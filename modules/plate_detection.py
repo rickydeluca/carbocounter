@@ -1,8 +1,11 @@
-import numpy as np
+import sys
+
 import cv2
 import imutils
+import numpy as np
 
-from utils import load_image
+from utils.read_write import load_image
+
 
 class PlateDetector:
     """
@@ -85,7 +88,7 @@ class PlateDetector:
         self.result_mask = image.copy()
         self.result_mask[(mask2 == 0)] = 0
 
-        return self.result_mask, self.plate_coords.squeeze(1)
+        return self.result_mask, self.plate_coords
     
     def detect_plate(self, image, scale=0.5):
         """
@@ -129,7 +132,7 @@ class PlateDetector:
         self.result_draw = image.copy()
         cv2.drawContours(self.result_draw, [c], -1, (0, 255, 0), 2)
 
-        return self.result_draw, self.plate_coords.squeeze(1)
+        return self.result_draw, self.plate_coords
     
     def save_result(self, path, type="contour"):
         """
@@ -163,8 +166,8 @@ class PlateDetector:
 if __name__ == "__main__":
 
     # Load sample image
-    path = "test/test_dish.jpg"
-    image = load_image(path)
+    path = "test/test_dish_3.png"
+    image = load_image(path, 120000)
     
     # Init plate detector
     plate_detector = PlateDetector()

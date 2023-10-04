@@ -1,7 +1,9 @@
 import cv2
 import numpy as np
 from plate_detection import PlateDetector
-from utils import load_image, pyramidal_mean_shift_filtering, region_growing, merge_small_regions
+
+from utils.read_write import load_image
+from utils.segmentation import *
 
 
 class FoodSegmenter:
@@ -14,9 +16,8 @@ class FoodSegmenter:
         self.mean_shifted_image = None
         self.segmented_image = None
 
-    def __call__(self, image, plate_coords):
-        return self.segment_food(image, plate_coords)
-    
+    def __call__(self, image, plate_coords, show_process=False):
+        return self.segment_food(image, plate_coords, show_process=show_process)
     
     def crop_image(self, image, coordinates):
         """
@@ -48,8 +49,7 @@ class FoodSegmenter:
         
         return cropped_image, relative_coordinates
 
-
-    def segment_food(self, image, plate_coords):
+    def segment_food(self, image, plate_coords, show_process=False):
 
         cv2.imshow("Original Image", image)
         cv2.waitKey(0)
@@ -58,39 +58,53 @@ class FoodSegmenter:
         # Crop image wrt the plate coordinates.
         cropped_image, relative_plate_coords = self.crop_image(image, plate_coords)
 
-        cv2.imshow("Cropped Image", cropped_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        if show_process:
+            cv2.imshow("Cropped Image", cropped_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
         # Apply pyramidal mean shift fitlering.
         sth = 10
         cth = 5
         mean_shifted_image = pyramidal_mean_shift_filtering(cropped_image, sth=sth, cth=cth, gaussian_levels=4, max_iterations=10, cast_back=False)
         
-        cv2.imshow("Mean Shifted Image", mean_shifted_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        if show_process:
+            cv2.imshow("Mean Shifted Image", mean_shifted_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
         # Apply region growing.
         rth = 4
         regions = region_growing(mean_shifted_image, rth)
 
-        cv2.imshow("Segmented Image", regions)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        if show_process:
+            cv2.imshow("Segmented Image", regions)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
         # Merge regions.
         merged_regions = merge_small_regions(mean_shifted_image, regions, ath=3000, cth=5000)
 
-        cv2.imshow("Merged Image", merged_regions)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-    
+        if show_process:
+            cv2.imshow("Merged Image", merged_regions)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        # Filter regions.
+        filtered_image, filtered_regions = filter_regions(merged_regions, relative_plate_coords)
+
+        if show_process:
+            cv2.imshow("Filtered Image", filtered_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        return filtered_regions
+
 
 if __name__ == "__main__":
 
     # Load sample image.
-    path = "test/test_dish.jpg"
+    path = "test/test_dish_3.png"
     image = load_image(path, max_size=120000)
     
     # Init modules.
@@ -99,6 +113,9 @@ if __name__ == "__main__":
 
     # Segment food.
     image, plate_coords = plate_detector.detect_plate(image, scale=1.0)
+    segmentation_map = food_segmenter(image, plate_coords, show_process=True)
 
-    food_segmenter(image, plate_coords)
+    # Unique labels in the segmentation map.
+    print("segmentation_shape:", segmentation_map.shape)
+
 
