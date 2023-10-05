@@ -1,14 +1,13 @@
-# Importing Libraries
-import numpy as np
-import matplotlib.pyplot as plt
 import cv2
-
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import datasets, transforms, models
-from torch.utils.data import DataLoader, random_split
 
+from PIL import Image
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, models, transforms
 from tqdm import tqdm
 
 DEBUG = True
@@ -45,14 +44,14 @@ train_data, val_test_data = random_split(data, [train_size, val_test_size])
 val_data, test_data = random_split(val_test_data, [val_size, test_size])
 
 # Create Data Loaders
-batch_size = 256 if device.type == 'cuda' else 64
+batch_size = 32 if device.type == 'cuda' else 32
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, pin_memory=True)
 test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, pin_memory=True)
 
 
 # Define model architecture
-model = models.inception_v3(weights='IMAGENET1K_V1').to(device)
+model = models.inception_v3(weights='IMAGENET1K_V1')
 model.fc = nn.Sequential(
     nn.BatchNorm1d(2048, eps=0.001, momentum=0.01),
     nn.Dropout(0.2),
@@ -62,6 +61,7 @@ model.fc = nn.Sequential(
     nn.Linear(1024, len(data.classes)),
     nn.Softmax(dim=1)
 )
+model = model.to(device)    # Move the model to the selected device
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -144,28 +144,58 @@ with torch.no_grad():
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-# print(f"Test Acc: {100 * correct / total}%")
+if not DEBUG:
+    print(f"Test Acc: {100 * correct / total}%")
 
-# Prediction Function using OpenCV
+
+# Sample predictions
+
 def predict_image(image_path, model, class_names):
-    img = cv2.imread(image_path)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_resized = cv2.resize(img_rgb, (228, 228))
+    """
+    Predict the class of an image and display the image with the predicted class as title.
+
+    This function loads an image from the specified path, applies the necessary transformations,
+    and passes it through the provided model to predict its class. The image along with the 
+    predicted class is then displayed using matplotlib.
+
+    Args:
+        image_path (str): Path to the image file to be predicted.
+        model (torch.nn.Module): The PyTorch model to be used for prediction.
+        class_names (list of str): List of class names, used to map the prediction output 
+                                   to a human-readable class name.
+
+    Returns:
+        None: The function displays the image and does not return any value.
+    """
+    # Load image using PIL
+    img_pil = Image.open(image_path)
     
-    img_tensor = transforms.ToTensor()(img_resized)
-    img_tensor = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(img_tensor)
-    img_tensor = img_tensor.unsqueeze(0).to(device)  # Move tensor to device
+    # Apply the same transformations as for the training images
+    transform = transforms.Compose([
+        transforms.Resize([342], interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.CenterCrop([299, 299]),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # Convert to pytorch tensor
+    img_tensor = transform(img_pil)
+    img_tensor = img_tensor.unsqueeze(0).to(device)
     
     model.eval()
     with torch.no_grad():
         output = model(img_tensor)
     
     _, predicted = torch.max(output, 1)
-    plt.title(f"Prediction: {class_names[predicted.item()]}", color='red')
-    plt.imshow(img_resized)
+    
+    # Display image with prediction using matplotlib
+    plt.imshow(img_pil)
+    plt.title(f"Prediction: {class_names[predicted.item()]}")
+    plt.axis('off')  # Do not show axis
     plt.show()
 
-# Example predictions
+
+
 predict_image(data_dir + 'baklava/1034361.jpg', model, data.classes)
 predict_image(data_dir + 'bibimbap/1014434.jpg', model, data.classes)
 predict_image(data_dir + 'donuts/104498.jpg', model, data.classes)
