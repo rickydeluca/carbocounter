@@ -1,4 +1,5 @@
-data/FoodSeg103
+data/*
 modules/__pycache__
+utils/__pycache__
 modules/plate_detection_2.py
 test/
