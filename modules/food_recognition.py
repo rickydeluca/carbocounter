@@ -1,118 +1,156 @@
-import os
 import cv2
+import torch
+import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sklearn.externals import joblib
-from skimage.feature import local_binary_pattern
-from sklearn.cluster import AgglomerativeClustering
-from scipy.cluster.hierarchy import dendrogram, linkage
+import torchvision.models as models
+import torchvision.transforms as transforms
+
+from joblib import dump, load
+from PIL import Image
+
+from skimage.color import label2rgb
+
+from utils.read_write import load_image
+from .plate_detection import PlateDetector
+from .food_segmentation import FoodSegmenter
 
 
-def color_agglomerative_clustering(data, max_num_clusters=1024):
-    """
-    Wrapper for the AgglomerativeClustering function as defined by scikit-learn library.
-    """
-    hierarchical_cluster = AgglomerativeClustering(n_clusters=max_num_clusters, affinity='euclidean', linkage='ward')
-    labels = hierarchical_cluster.fit_predict(data)
-
-    return labels
-
-
-def get_dominant_colors(colors, num_clusters=1024):
-    """
-    Get the dominant colors ceneter after applying an agglomerative hierarchical clustering
-    over a set of color values.
-    """
-    # Hierachical clustering.
-    labels = color_agglomerative_clustering(colors, max_num_clusters=num_clusters)
-
-    # Compute dominant colors.
-    dominant_colors = np.array([colors[labels == i].mean(axis=0) for i in range(num_clusters)])
-
-    return dominant_colors
-
-
-def color_histogram(image, dominant_colors):
-    """
-    Compute the histogram of an image based on the given dominant colors.
-    """
-    # Flatten the image and find the closest dominant color for each pixel.
-    pixels = image.reshape(-1, 3)
-    closest_dominant_colors = np.argmin(np.linalg.norm(pixels[:, np.newaxis] - dominant_colors, axis=2), axis=1)
-    
-    # Compute the histogram.
-    histogram, _ = np.histogram(closest_dominant_colors, bins=np.arange(len(dominant_colors) + 1))
-    
-    return histogram
-
-
-def get_color_histograms(images, num_clusters=1024, sample_size=None):
-    # Extract BGR values.
-    bgr_values = np.vstack([img.reshape(-1, 3) for img in images])
-    sample_size = bgr_values.shape[0] if sample_size is None else sample_size # Use all colors if not specified
-    rgb_sample = bgr_values[np.random.choice(bgr_values.shape[0], sample_size, replace=False)]
-
-    # Get dominant colors.
-    dominant_colors = get_dominant_colors(rgb_sample, num_clusters=num_clusters)
-
-    # Compute the color histograms for each image.
-    color_histograms = [color_histogram(img, dominant_colors) for img in images]
-
-    return color_histograms
-
-
-def multi_radius_lbp(image, radii, points_per_radius):
-    """
-    Compute the concatenated LBP histograms for multiple radii.
-    """
-    histograms = []
-    
-    for radius, n_points in zip(radii, points_per_radius):
-        lbp_img = local_binary_pattern(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), n_points, radius, method="uniform")
+class FoodRecognizer:
+    def __init__(self, model="inception_v3"):
         
-        # Given the "uniform" method and n_points, the maximum number of unique patterns is: n_points*(n_points-1)+3
-        max_bins = n_points*(n_points-1) + 3
-        lbp_hist, _ = np.histogram(lbp_img.ravel(), bins=max_bins, range=(0, max_bins))
-        
-        histograms.append(lbp_hist)
+        # Load trained model
+        if model == "inception_v3":
+            self.model = models.inception_v3(weights='IMAGENET1K_V1')
+            self.model.fc = nn.Sequential(
+                nn.BatchNorm1d(2048, eps=0.001, momentum=0.01),
+                nn.Dropout(0.2),
+                nn.Linear(2048, 1024),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(1024, 101),
+                nn.Softmax(dim=1)
+            )
+
+            self.model.load_state_dict(torch.load(
+                'best_models/inception_v3.pth',
+                map_location=torch.device('cpu')))
+
+            self.model.eval()
+
+        elif model == "svm":
+            self.model = load('best_models/svm.joblib')
+
+        else:
+            raise ValueError("Classification model not supported. Please use 'inception_v3' or 'svm'.")
     
-    return np.concatenate(histograms)
+    def preprocess_segment(self, segment):
+        preprocess = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((299, 299)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        segment = segment.astype(np.uint8)  # Ensure data type is uint8
+        return preprocess(segment)
+    
+    def predict(self, segment):
+        input_tensor = self.preprocess_segment(segment).unsqueeze(0)  # add batch dim
+        with torch.no_grad():
+            output = self.model(input_tensor)
+        return output
+    
+    def extract_and_predict(self, image, segments):
+        for i, seg_val in enumerate(np.unique(segments)):
+            if i == 0:      # Discard background
+                continue
+
+            mask = np.zeros_like(segments)
+            mask[segments == seg_val] = 1
+            
+            # Extract region and preprocess
+            region = image * np.expand_dims(mask, axis=-1)      # Extract region
+            region = region[np.ix_(mask.any(1),mask.any(0))]    # Crop to bounding box
+            
+            # Predict
+            prediction = self.predict(region)
+            predicted_label = prediction.argmax().item()
+
+            # Display
+            self.display_segment(region, predicted_label)
+            print("Segment:", seg_val, "Prediction:", predicted_label)
 
 
-def get_lbp_histograms(images, radii=[1,2,3], points_per_radius=[8,16,24], vector_size=256):
-    # Compute Multi radious LBP for each image.
-    lbp_images = [multi_radius_lbp(img, radii, points_per_radius) for img in images]
+    def _extract_and_predict(self, image, segments):
+        for i, seg_val in enumerate(np.unique(segments)):
+            if i == 0:      # Discard background
+                continue
 
-    # Compute LBP histograms.
-    lbp_histograms = [np.histogram(lbp_img.ravel(), bins=vector_size, range=(0, vector_size))[0] for lbp_img in lbp_images]
+            mask = np.zeros_like(segments)
+            mask[segments == seg_val] = 1
+            
+            # Extract region and preprocess
+            region = image * np.expand_dims(mask, axis=-1)  # Extract region
+            region_background = image * np.expand_dims(1-mask, axis=-1) # Extract inverse region (background)
+            region = region + region_background # Combine to keep original background
+            
+            # Crop to bounding box
+            coords = np.column_stack(np.where(mask))
+            x_min, y_min = coords.min(axis=0)
+            x_max, y_max = coords.max(axis=0)
+            region = region[x_min:x_max+1, y_min:y_max+1]
+            
+            # Predict
+            prediction = self.predict(region)
+            predicted_label = prediction.argmax().item()
 
-    return lbp_histograms
+            # Display
+            self.display_segment(region, predicted_label)
+            print("Segment:", seg_val, "Prediction:", predicted_label)
 
 
-def main():
-    # Load all images.
-    img_dir = "data/FoodSeg103/Images/img_dir/train"
-    image_files = [os.path.join(img_dir, f) for f in os.listdir(img_dir) if f.endswith(".jpg")][:3800]
-    images = [cv2.imread(img_file) for img_file in image_files]
+    def display_segment(self, segment, predicted_label):
+        # Note: you may map `predicted_label` to a string label if you have a mapping
+        plt.imshow(segment)
+        plt.title(f"Predicted: {predicted_label}")
+        plt.axis('off')
+        plt.show()
 
-    # Resize them.
-    processed_images = [cv2.resize(img, (32, 32)) for img in images]
+    
+    def visualize_results(self, image_rgb, image_segments, merged_segments=None):
+        plt.subplot(1,3,1)
+        plt.imshow(image_rgb)
+        plt.title('Original Image')
 
-    # Get color histograms.
-    num_clusters = 1024
-    sample_size = 10000
-    color_histograms = get_color_histograms(processed_images, num_clusters=num_clusters, sample_size=sample_size)
+        plt.subplot(1,3,2)
+        plt.imshow(label2rgb(image_segments, image_rgb, kind='avg'))
+        plt.title('SLIC Segments')
 
-    # Get texture histograms.
-    radii = [1, 2, 3]
-    points_per_radius = [8, 16, 24]
-    lbp_histograms = get_lbp_histograms(processed_images, radii=radii, points_per_radius=points_per_radius)
+        if merged_segments is not None:
+            plt.subplot(1,3,3)
+            plt.imshow(label2rgb(merged_segments, image_rgb, kind='avg'))
+            plt.title('Merged Segments')
+        
+        plt.show()
 
-    # Combine features.
-    combined_features = [np.concatenate((color_histograms[i], lbp_histograms[i])) for i in range(len(images))]
-
-    print(f"Feature vector shape: {combined_features[0].shape}")
 
 if __name__ == "__main__":
-    main()
+
+    # Load sample image
+    path = "test/test_dish_4.jpg"
+    image = load_image(path, max_size=120000)
+    
+    # Init modules
+    plate_detector = PlateDetector()
+    food_segmenter = FoodSegmenter(slic=True)
+    food_recognizer = FoodRecognizer(model='inception_v3')
+
+    # Segment food
+    _, plate_mask = plate_detector.detect_plate_and_mask(image, scale=1.0)
+    image_segments = food_segmenter(image, plate_mask, display=True)
+
+    # Classfy food
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    merged_segments = food_recognizer.extract_and_predict(image_rgb, image_segments)
+    food_recognizer.visualize_results(image_rgb, image_segments, merged_segments)

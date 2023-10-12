@@ -1,4 +1,3 @@
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -6,33 +5,38 @@ import torch.nn as nn
 import torch.optim as optim
 
 from PIL import Image
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 from torchvision import datasets, models, transforms
 from tqdm import tqdm
 
-DEBUG = True
+# Modify these varibles to control the code execution
+DEBUG   = False
+TRAIN   = True
+TEST    = True
 
 # Set the default device
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-if DEBUG:
-    print("Is CUDA available: ", torch.cuda.is_available())
-    print("CUDA device count: ", torch.cuda.device_count())
-    print("Current device: ", device)
 
 # Useful paths
-data_dir = 'data/food-101/images/'
-best_model_dir = 'classification_models/inception_v3.pth'   # Where to save the best found model
+data_dir = "data/food-101/images/"
+best_model_dir = "best_models/inception_v3.pth"
 
 # Image preprocessing
-transform = transforms.Compose([
-    transforms.Resize([342], interpolation=transforms.InterpolationMode.BILINEAR),
-    transforms.CenterCrop([299, 299]),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
+train_transform =   transforms.Compose([
+                    transforms.RandomResizedCrop(299),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])])
 
-# Load data
-data = datasets.ImageFolder(root=data_dir, transform=transform)
+test_transform =    transforms.Compose([
+                    transforms.Resize((299, 299)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])])
+
+# Load data without applying any transform
+data = datasets.ImageFolder(root=data_dir)
 
 # Split in train, val and test
 train_size = int(0.7 * len(data))
@@ -43,12 +47,22 @@ test_size = val_test_size - val_size
 train_data, val_test_data = random_split(data, [train_size, val_test_size])
 val_data, test_data = random_split(val_test_data, [val_size, test_size])
 
+# Apply the train_transform only to train_data
+train_data = Subset(train_data.dataset, train_data.indices)
+train_data.dataset.transform = train_transform
+
+# Apply the test_transform to val_data and test_data
+val_data = Subset(val_data.dataset, val_data.indices)
+val_data.dataset.transform = test_transform
+
+test_data = Subset(test_data.dataset, test_data.indices)
+test_data.dataset.transform = test_transform
+
 # Create Data Loaders
-batch_size = 32 if device.type == 'cuda' else 32
+batch_size = 16 if device.type == 'cuda' else 8
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, pin_memory=True)
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, pin_memory=True)
 test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, pin_memory=True)
-
 
 # Define model architecture
 model = models.inception_v3(weights='IMAGENET1K_V1')
@@ -63,93 +77,99 @@ model.fc = nn.Sequential(
 )
 model = model.to(device)    # Move the model to the selected device
 
-# Define loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+if TRAIN:
 
-# Train and validate (using early stopping)
-num_epochs = 1 if DEBUG else 50
-patience = 5            # Patience for early stopping
-best_val_loss = np.inf  # Initialize best validation loss
-stop_counter = 0        # Counter for early stopping
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-for epoch in range(num_epochs):
-    # Training loop:
-    model.train()
-    running_loss = 0.0
-    for inputs, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} Training", unit="batch"):
-        inputs, labels = inputs.to(device), labels.to(device)
-        if DEBUG:
-            print(f"labels: {labels}")
-            break
-        optimizer.zero_grad()
-        outputs, _ = model(inputs)          # Do not consider auxiliary output
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item()
-    
-    # Validation loop:
-    model.eval()
-    val_loss = 0.0
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for inputs, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} Validation", unit="batch"):
-            if DEBUG:
-                break
+    # Train and validate (using early stopping)
+    num_epochs = 1 if DEBUG else 50
+    patience = 5            # Patience for early stopping
+    best_val_loss = np.inf  # Initialize best validation loss
+    stop_counter = 0        # Counter for early stopping
+
+    for epoch in range(num_epochs):
+        # Training loop:
+        model.train()
+        running_loss = 0.0
+        for inputs, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} Training", unit="batch"):
             inputs, labels = inputs.to(device), labels.to(device)
-            outputs, _  = model(inputs)     # Do not consider auxiliary output
+            if DEBUG:
+                print(f"labels: {labels}")
+                break
+            optimizer.zero_grad()
+            outputs, _ = model(inputs)          # Do not consider auxiliary output
             loss = criterion(outputs, labels)
-            val_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-    
-    if DEBUG:
-        break
-
-    # Print training informations
-    print(f"Epoch {epoch+1}/{num_epochs}, "
-          f"Train Loss: {running_loss/len(train_loader)}, "
-          f"Val Loss: {val_loss/len(val_loader)}, "
-          f"Val Acc: {100 * correct / total}%")
-    
-    # Early stopping
-    if val_loss < best_val_loss:
-        best_val_loss = val_loss
-        stop_counter = 0                                # Reset counter
-        torch.save(model.state_dict(), best_model_dir)  # Save best model
-    else:
-        stop_counter += 1
-        if stop_counter >= patience:
-            print("Early stopping triggered.")
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+        
+        # Validation loop:
+        model.eval()
+        val_loss = 0.0
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for inputs, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} Validation", unit="batch"):
+                if DEBUG:
+                    break
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+        
+        if DEBUG:
             break
+
+        # Print training informations
+        print(f"Epoch {epoch+1}/{num_epochs}, "
+            f"Train Loss: {running_loss/len(train_loader)}, "
+            f"Val Loss: {val_loss/len(val_loader)}, "
+            f"Val Acc: {100 * correct / total}%")
+        
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            stop_counter = 0                                # Reset counter
+            torch.save(model.state_dict(), best_model_dir)  # Save best model
+        else:
+            stop_counter += 1
+            if stop_counter >= patience:
+                print("Early stopping triggered.")
+                break
+
 
 # Load best model
 if not DEBUG:   
     model.load_state_dict(torch.load(best_model_dir))
 
+
 # Test:
-model.eval()
-correct = 0
-total = 0
-with torch.no_grad():
-    for inputs, labels in tqdm(test_loader, desc="Testing", unit="batch"):
-        if DEBUG:
-            break
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs)
-        _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
+if TEST:
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in tqdm(test_loader, desc="Testing", unit="batch"):
+            if DEBUG:
+                break
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
-if not DEBUG:
-    print(f"Test Acc: {100 * correct / total}%")
+    if not DEBUG:
+        print(f"Test Acc: {100 * correct / total}%")
 
 
-# Sample predictions
-
+# ======================
+#   SAMPLE PREDICTIONS
+# ======================
 def predict_image(image_path, model, class_names):
     """
     Predict the class of an image and display the image with the predicted class as title.
@@ -172,11 +192,10 @@ def predict_image(image_path, model, class_names):
     
     # Apply the same transformations as for the training images
     transform = transforms.Compose([
-        transforms.Resize([342], interpolation=transforms.InterpolationMode.BILINEAR),
-        transforms.CenterCrop([299, 299]),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+                transforms.Resize((299, 299)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])])
     
     # Convert to pytorch tensor
     img_tensor = transform(img_pil)
@@ -193,8 +212,6 @@ def predict_image(image_path, model, class_names):
     plt.title(f"Prediction: {class_names[predicted.item()]}")
     plt.axis('off')  # Do not show axis
     plt.show()
-
-
 
 predict_image(data_dir + 'baklava/1034361.jpg', model, data.classes)
 predict_image(data_dir + 'bibimbap/1014434.jpg', model, data.classes)

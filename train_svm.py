@@ -64,7 +64,7 @@ print(classification_report(y_test, y_pred))
 
 # Save the best SVM model
 best_svm_model = grid_search.best_estimator_
-dump(best_svm_model, 'classification_models/svm.joblib')
+dump(best_svm_model, 'best_models/svm.joblib')
 
 # # Load the model
 # loaded_svm_model = load('best_svm_model.joblib')

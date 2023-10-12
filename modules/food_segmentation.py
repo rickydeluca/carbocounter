@@ -1,23 +1,28 @@
 import cv2
 import numpy as np
-from plate_detection import PlateDetector
+import matplotlib.pyplot as plt
+
+from .plate_detection import PlateDetector
 
 from utils.read_write import load_image
 from utils.segmentation import *
 
+from skimage.segmentation import slic, clear_border, expand_labels
+from skimage.color import label2rgb, rgb2lab
 
 class FoodSegmenter:
     """
     A class to segment food in an image.
     """
 
-    def __init__(self):
+    def __init__(self, slic=True):
+        self.slic = slic                # Use SLIC algorithm
         self.input_image = None
         self.mean_shifted_image = None
         self.segmented_image = None
 
-    def __call__(self, image, plate_coords, show_process=False):
-        return self.segment_food(image, plate_coords, show_process=show_process)
+    def __call__(self, image, plate_coords, display=False):
+        return self.segment_food(image, plate_coords, display=display)
     
     def crop_image(self, image, coordinates):
         """
@@ -49,73 +54,114 @@ class FoodSegmenter:
         
         return cropped_image, relative_coordinates
 
-    def segment_food(self, image, plate_coords, show_process=False):
+    def segment_food(self, image, plate_coords, display=False):
 
         cv2.imshow("Original Image", image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        # Crop image wrt the plate coordinates.
-        cropped_image, relative_plate_coords = self.crop_image(image, plate_coords)
+        if self.slic:
 
-        if show_process:
-            cv2.imshow("Cropped Image", cropped_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            # Convert to RGB for SLIC
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # Apply pyramidal mean shift fitlering.
-        sth = 10
-        cth = 5
-        mean_shifted_image = pyramidal_mean_shift_filtering(cropped_image, sth=sth, cth=cth, gaussian_levels=4, max_iterations=10, cast_back=False)
+            # Apply SLIC
+            image_segments = slic(image_rgb,
+                                  n_segments=30,
+                                  compactness=10,
+                                  max_num_iter=10,
+                                  convert2lab=True,
+                                  min_size_factor=0.3,
+                                  max_size_factor=3)
+            
+            # Clear borders
+            image_segments_filtered = clear_border(image_segments, mask=plate_coords)
+
+            # Region growing
+            image_segments_merged = expand_labels(image_segments_filtered, distance=10)
+            
+            if display:                 # Display output
+                
+                plt.subplot(2,2,1)      # Original
+                plt.imshow(image_rgb)
+
+                plt.subplot(2,2,2)      # Segmented
+                plt.imshow(label2rgb(image_segments,
+                                     image_rgb,
+                                     kind = 'avg'))
+
+                plt.subplot(2,2,3)      # Filtered
+                plt.imshow(label2rgb(image_segments_filtered,
+                                     image_rgb,
+                                     kind = 'avg'))
+                
+                plt.subplot(2,2,4)      # Region growing
+                plt.imshow(label2rgb(image_segments_merged,
+                                     image_rgb,
+                                     kind = 'avg'))
+                
+                plt.show()
+            
+            return image_segments_merged
+
+        # # Crop image wrt the plate coordinates.
+        # cropped_image, relative_plate_coords = self.crop_image(image, plate_coords)
+
+        # if display:
+        #     cv2.imshow("Cropped Image", cropped_image)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
+
+        # # Apply pyramidal mean shift fitlering.
+        # sth = 10
+        # cth = 5
+        # mean_shifted_image = pyramidal_mean_shift_filtering(cropped_image, sth=sth, cth=cth, gaussian_levels=4, max_iterations=10, cast_back=False)
         
-        if show_process:
-            cv2.imshow("Mean Shifted Image", mean_shifted_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # if display:
+        #     cv2.imshow("Mean Shifted Image", mean_shifted_image)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
 
-        # Apply region growing.
-        rth = 4
-        regions = region_growing(mean_shifted_image, rth)
+        # # Apply region growing.
+        # rth = 4
+        # regions = region_growing(mean_shifted_image, rth)
 
-        if show_process:
-            cv2.imshow("Segmented Image", regions)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # if display:
+        #     cv2.imshow("Segmented Image", regions)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
 
-        # Merge regions.
-        merged_regions = merge_small_regions(mean_shifted_image, regions, ath=3000, cth=5000)
+        # # Merge regions.
+        # merged_regions = merge_small_regions(mean_shifted_image, regions, ath=3000, cth=5000)
 
-        if show_process:
-            cv2.imshow("Merged Image", merged_regions)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # if display:
+        #     cv2.imshow("Merged Image", merged_regions)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
 
-        # Filter regions.
-        filtered_image, filtered_regions = filter_regions(merged_regions, relative_plate_coords)
+        # # Filter regions.
+        # filtered_image, filtered_regions = filter_regions(merged_regions, relative_plate_coords)
 
-        if show_process:
-            cv2.imshow("Filtered Image", filtered_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+        # if display:
+        #     cv2.imshow("Filtered Image", filtered_image)
+        #     cv2.waitKey(0)
+        #     cv2.destroyAllWindows()
 
-        return filtered_regions
+        # return filtered_regions
 
 
 if __name__ == "__main__":
 
-    # Load sample image.
+    # Load sample image
     path = "test/test_dish_3.png"
     image = load_image(path, max_size=120000)
     
-    # Init modules.
+    # Init modules
     food_segmenter = FoodSegmenter()
     plate_detector = PlateDetector()
 
-    # Segment food.
-    image, plate_coords = plate_detector.detect_plate(image, scale=1.0)
-    segmentation_map = food_segmenter(image, plate_coords, show_process=True)
-
-    # Unique labels in the segmentation map.
-    print("segmentation_shape:", segmentation_map.shape)
+    # Segment food
+    _, plate_mask = plate_detector.detect_plate_and_mask(image, scale=1.0)
+    image_segments = food_segmenter(image, plate_mask, display=True)
 
 

@@ -88,7 +88,12 @@ class PlateDetector:
         self.result_mask = image.copy()
         self.result_mask[(mask2 == 0)] = 0
 
-        return self.result_mask, self.plate_coords
+        # Get boolean mask
+        plate_mask = np.ones(mask2.shape, dtype=bool)
+        plate_mask[(mask2 == 0)] = False
+        self.plate_mask = plate_mask
+        
+        return self.result_mask, self.plate_mask
     
     def detect_plate(self, image, scale=0.5):
         """
