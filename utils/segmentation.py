@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+from scipy.ndimage import distance_transform_edt
+from skimage.color import label2rgb, rgb2lab
 
 
 class Stack:
@@ -311,5 +313,53 @@ def filter_regions(seg_image, plate_coords=None):
 
     return cont_image, final_contours
 
+def custom_lab_distance(p1, p2):
+    """
+    Compute the distance between two points in LAB color space without
+    squaring L term.
+
+    As described in: https://ieeexplore.ieee.org/document/6701608
+    
+    Args:
+        p1, p2:     The color points in LAB space.
+                    Each should be a 3-element iterable.
+    
+        Returns:    The Euclidean distance between p1 and p2 in LAB space
+                    (without squaring the L term).
+    """
+    dL = p1[0] - p2[0]
+    da = p1[1] - p2[1]
+    db = p1[2] - p2[2]
+    return np.sqrt(abs(dL) + da**2 + db**2)
 
 
+def custom_expand_labels(label_image, distance=1):
+    """
+    Custom version of skimage.segmentation.expand_labels() function that
+    use the lab color distance as defined in "Segmentation and Recognition of 
+    Multi-Food Meal Images for Carbohydrate Counting" by Anthimopoulos et al.
+    (2013).
+
+    Links:
+        original function:
+            https://scikit-image.org/docs/stable/api/skimage.segmentation.html
+        
+        lab color distance:
+            https://ieeexplore.ieee.org/document/6701608
+    """
+
+    distances, nearest_label_coords = distance_transform_edt(
+        label_image == 0, return_indices=True
+    )
+    labels_out = np.zeros_like(label_image)
+    dilate_mask = distances <= distance
+    # build the coordinates to find nearest labels,
+    # in contrast to [1] this implementation supports label arrays
+    # of any dimension
+    masked_nearest_label_coords = [
+        dimension_indices[dilate_mask]
+        for dimension_indices in nearest_label_coords
+    ]
+    nearest_labels = label_image[tuple(masked_nearest_label_coords)]
+    labels_out[dilate_mask] = nearest_labels
+    return labels_out

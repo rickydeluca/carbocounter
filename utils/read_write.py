@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 
-
 def load_image(img_path, max_size=None, cvt=None):
     """
     Rescale the input image while preserving its aspect ratio such that its 
