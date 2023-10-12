@@ -1,5 +1,12 @@
-data/*
+best_models/
+data/
+test/
+
+datasets/__pycache__
+models/__pycache__
 modules/__pycache__
 utils/__pycache__
-modules/plate_detection_2.py
-test/
+train_utils/__pycache__
+
+train_deeplabv3.py
+carbo-count.yml
