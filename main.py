@@ -46,16 +46,6 @@ def main():
     segmentation_map = food_segmenter(left_image, plate_mask, display=args.verbose)
     segmentation_map = food_recognizer(left_image, segmentation_map, display=args.verbose)
     volume_estimator(left_image, right_image, segmentation_map, reference_img=None, reference_size=None, display=True)
-    # print("Predicted classes: ", np.unique(segmentation_map))
-
-
-    # plate_detector.save_result("test/plate_detection_output_contour.jpg", type="contour")
-    # plate_detector.save_result("test/plate_detection_output_mask.jpg", type="mask")
-
-    # print("plate_coords shape:", plate_coords.shape)
-    # print("plate_mask shape:", plate_mask.shape)
-    # print("masked image shape:", plate_detector.out_img_mask.shape)
-    # print("contoured image shape:", plate_detector.out_img_contour.shape)
 
 if __name__ == "__main__":
     main()
