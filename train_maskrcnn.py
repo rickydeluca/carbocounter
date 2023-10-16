@@ -3,7 +3,7 @@ import torch
 from train_utils.engine import train_one_epoch, train_one_epoch_v2, evaluate
 from train_utils.utils import collate_fn
 
-from datasets.foodseg103_dataset import FoodSeg103Dataset
+from datasets.foodseg103_dataset import FoodSeg103Dataset, MyFoodSeg103Dataset
 from models.maskrcnn import *
 
 # Reproducibility
@@ -16,17 +16,15 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 num_classes = 104   # 103 food classes + background
 
 # Useful paths
-data_dir = 'data/FoodSeg103' # 'test/MiniFoodSeg103/Images'
+data_dir = 'data/MyFoodSeg103' # 'test/MiniFoodSeg103/Images'
 model_dir = 'best_models'
 
-# Load dataset
-train_dataset = FoodSeg103Dataset(data_dir + '/Images',
-                            get_transform(train=True),
-                            mode='train')
+# Load datasets and split them
+dataset_size    = 7118
+train_size      = dataset_size - 50
+train_dataset   = MyFoodSeg103Dataset(data_dir, get_transform(train=True), start=0, end=train_size)
+test_dataset    = MyFoodSeg103Dataset(data_dir, get_transform(train=False), start=0, end=dataset_size)
 
-test_dataset = FoodSeg103Dataset(data_dir + '/Images',
-                                 get_transform(train=False),
-                                 mode='test')
 
 # Get the class names dictionary (class_id: class_name)
 id2class = {}
@@ -35,17 +33,12 @@ with open(data_dir + "/category_id.txt", "r") as f:
         key, value = line.split('\t')
         id2class[key] = value
 
-# # Train, test split
-# indices         = torch.randperm(len(dataset)).tolist()
-# dataset         = torch.utils.data.Subset(dataset, indices[:-50])
-# dataset_test    = torch.utils.data.Subset(dataset_test, indices[-50:])
-
 # Define DataLoaders
 train_dataloader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=2,
     shuffle=True,
-    num_workers=2,
+    num_workers=4,
     collate_fn=collate_fn
 )
 
@@ -53,7 +46,7 @@ test_dataloader = torch.utils.data.DataLoader(
     test_dataset,
     batch_size=1,
     shuffle=False,
-    num_workers=2,
+    num_workers=4,
     collate_fn=collate_fn
 )
 
@@ -91,14 +84,13 @@ no_improve_epochs   = 0
 for epoch in range(num_epochs):
     
     # Train for one epoch, print every 10 iterations
-    train_one_epoch_v2(model,
-                       optimizer,
-                       train_dataloader,
-                       device,
-                       epoch,
-                       print_freq=1,
-                       scaler=scaler,
-                       grad_accum_steps=4)
+    train_one_epoch(model,
+                    optimizer,
+                    train_dataloader,
+                    device,
+                    epoch,
+                    print_freq=10,
+                    scaler=scaler)
 
     # Update learning rate
     lr_scheduler.step()
@@ -115,7 +107,7 @@ for epoch in range(num_epochs):
     if current_metric > best_metric:
         best_metric = current_metric
         no_improve_epochs = 0                               # Reset counter
-        torch.save(model.state_dict(), model_dir + "maskrcnn_best.pth")
+        torch.save(model.state_dict(), model_dir + "/maskrcnn_best.pth")
         print(f"New best metric: {best_metric:.4f}, model saved.")
     else:
         no_improve_epochs += 1

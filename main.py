@@ -1,8 +1,65 @@
-import cv2
+import argparse
+import numpy as np
+
+from modules.plate_detection import PlateDetector
+from modules.food_segmentation import FoodSegmenter
+from modules.food_recognition import FoodRecognizer
+from modules.volume_estimation import VolumeEstimator
 
 from utils.read_write import load_image
 
-img = load_image("test/test_dish_3.png", 120000)
-cv2.imshow("Test Dish", img)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+def parse_args():
+    """
+    Read the terminal inputs.
+    """
+
+    parser = argparse.ArgumentParser(
+        prog='CarboCount',
+        description='Given two stereo images representing the same dish, segment the different foods and compute the quanity of carbohydrates within them.'
+    )
+    
+    parser.add_argument('-l', '--left_image', type=str, required=True, help='Path to the left stereo image.')
+    parser.add_argument('-r', '--right_image', type=str, required=True, help='Path to the right stereo image.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Display the process step by step.')
+    parser.add_argument('--segmentator', type=str, default="slic", help="Model used for food segmentation.")
+    parser.add_argument('--classificator', type=str, default="inception_v3", help="Model used for food classification.")
+
+    return parser.parse_args()
+
+
+def main():
+    # Read terminal input
+    args = parse_args()
+
+    # Load images
+    left_image = load_image(args.left_image)
+    right_image = load_image(args.right_image)
+
+    # Init framework modules
+    plate_detector = PlateDetector()
+    food_segmenter = FoodSegmenter(model=args.segmentator)
+    food_recognizer = FoodRecognizer(model=args.classificator)
+    volume_estimator = VolumeEstimator()
+
+    # Run framework
+    plate_coords, plate_mask = plate_detector(left_image)
+    segmentation_map = food_segmenter(left_image, plate_mask, display=args.verbose)
+    segmentation_map = food_recognizer(left_image, segmentation_map, display=args.verbose)
+    volume_estimator(left_image, right_image, segmentation_map, reference_img=None, reference_size=None, display=True)
+    # print("Predicted classes: ", np.unique(segmentation_map))
+
+
+    # plate_detector.save_result("test/plate_detection_output_contour.jpg", type="contour")
+    # plate_detector.save_result("test/plate_detection_output_mask.jpg", type="mask")
+
+    # print("plate_coords shape:", plate_coords.shape)
+    # print("plate_mask shape:", plate_mask.shape)
+    # print("masked image shape:", plate_detector.out_img_mask.shape)
+    # print("contoured image shape:", plate_detector.out_img_contour.shape)
+
+if __name__ == "__main__":
+    main()
+
+
+
+

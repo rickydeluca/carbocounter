@@ -1,4 +1,4 @@
-import cv2
+import cv2 as cv
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 from skimage.color import label2rgb, rgb2lab
@@ -105,12 +105,12 @@ def pyramidal_mean_shift_filtering(image, sth=5, cth=10, gaussian_levels=4, max_
     """
 
     # Convert to CIELAB color space.
-    LAB_image = cv2.cvtColor(image, cv2.COLOR_BGR2Lab).astype(float)
+    LAB_image = cv.cvtColor(image, cv.COLOR_BGR2Lab).astype(float)
 
     # Create a Gaussian pyramid.
     pyramid = [LAB_image]
     for _ in range(gaussian_levels - 1): 
-        LAB_image = cv2.pyrDown(LAB_image)
+        LAB_image = cv.pyrDown(LAB_image)
         pyramid.append(LAB_image)
 
     # Perform mean shift on each pyramid level, starting from the smallest scale.
@@ -129,17 +129,17 @@ def pyramidal_mean_shift_filtering(image, sth=5, cth=10, gaussian_levels=4, max_
         # Propagate to the upper scale.
         if pyramid.index(level) > 0:
             upper = pyramid[pyramid.index(level) - 1]
-            level_upsampled = cv2.pyrUp(level)
+            level_upsampled = cv.pyrUp(level)
 
             # Ensuring same shape by cropping or padding as necessary
             if level_upsampled.shape != upper.shape:
-                level_upsampled = cv2.resize(level_upsampled, (upper.shape[1], upper.shape[0]))
+                level_upsampled = cv.resize(level_upsampled, (upper.shape[1], upper.shape[0]))
 
             mask = lab_distance(level_upsampled, upper) > cth
             upper[mask] = level_upsampled[mask]
 
     if cast_back:
-        return cv2.cvtColor(pyramid[0].astype(np.uint8), cv2.COLOR_Lab2BGR)
+        return cv.cvtColor(pyramid[0].astype(np.uint8), cv.COLOR_Lab2BGR)
     
     return  pyramid[0].astype(np.uint8)
 
@@ -269,19 +269,19 @@ def filter_regions(seg_image, plate_coords=None):
     """
 
     # Find the contours of the segments.
-    gray_image = cv2.cvtColor(seg_image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray_image, 50, 75)
-    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    gray_image = cv.cvtColor(seg_image, cv.COLOR_BGR2GRAY)
+    edges = cv.Canny(gray_image, 50, 75)
+    contours, _ = cv.findContours(edges, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
 
     # Get the plate contour.
-    largest_contour = max(contours, key=cv2.contourArea)
+    largest_contour = max(contours, key=cv.contourArea)
 
     # Create a mask for the largest contour.
     largest_mask = np.zeros_like(edges)
-    cv2.drawContours(largest_mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
+    cv.drawContours(largest_mask, [largest_contour], -1, 255, thickness=cv.FILLED)
 
     # Compute the distance transform of the largest contour mask.
-    dist_transform = cv2.distanceTransform(largest_mask, cv2.DIST_L2, 5)
+    dist_transform = cv.distanceTransform(largest_mask, cv.DIST_L2, 5)
 
     # Filterin 1: Regions outside the plate.
     filtered_contours = [largest_contour]
@@ -289,13 +289,13 @@ def filter_regions(seg_image, plate_coords=None):
         if cnt is not largest_contour:
             # Create a mask for the current contour.
             mask = np.zeros_like(edges)
-            cv2.drawContours(mask, [cnt], -1, 255, thickness=cv2.FILLED)
+            cv.drawContours(mask, [cnt], -1, 255, thickness=cv.FILLED)
             
             # Compute the intersection with the largest contour.
-            intersect = cv2.bitwise_and(mask, largest_mask)
+            intersect = cv.bitwise_and(mask, largest_mask)
             
             # Check if more than 10% of its area is outside the largest contour.
-            if cv2.countNonZero(intersect) >= 0.9 * cv2.contourArea(cnt):
+            if cv.countNonZero(intersect) >= 0.9 * cv.contourArea(cnt):
                 filtered_contours.append(cnt)
 
     # Filtering 2: Borders sharing with the plate.
@@ -309,7 +309,7 @@ def filter_regions(seg_image, plate_coords=None):
 
     # Draw the filtered contours on the original image.
     cont_image = np.copy(seg_image)
-    cv2.drawContours(cont_image, final_contours, -1, (0, 255, 0), 2)
+    cv.drawContours(cont_image, final_contours, -1, (0, 255, 0), 2)
 
     return cont_image, final_contours
 

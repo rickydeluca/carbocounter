@@ -1,65 +1,55 @@
-import cv2
-import numpy as np
-from scipy.optimize import least_squares
-
-from utils.calibration import salient_points_matching, salient_orb_matching, error_function
-from utils.read_write import load_image
-from modules.plate_detection import PlateDetector
+from utils.stereo_matching import *
 
 class VolumeEstimator:
 
-    def __init__(self, img1, img2, border1, border2, reference_card_dims=None, segmentation_map=None):
-        self.img1 = img1
-        self.img2 = img2
-        self.border1 = border1 # Plate coords in the first image
-        self.border2 = border2 # Plate coords in the second image
-        self.reference_card_dims = reference_card_dims
-        self.segmentation_map = segmentation_map
-
-    def extrinsic_calibration(self):
-        # Match salient points.
-        img1_gray = cv2.cvtColor(self.img1, cv2.COLOR_BGR2GRAY)
-        img2_gray = cv2.cvtColor(self.img2, cv2.COLOR_BGR2GRAY) 
-        img_matches, points1, points2 = salient_orb_matching(img1_gray, img2_gray)
-
-        # Display or save results.
-        cv2.imshow('Matches', img_matches)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-        # Get candidate pose with RANSAC.
-        H_init, inliers = cv2.findHomography(points1, points2, method=cv2.RANSAC, ransacReprojThreshold=3.0)
-
-        print("Homography Matrix:")
-        print(H_init)
-        print("Inliers mask:")
-        print(inliers)
-
-        # Flatten the initial H matrix to a vector.
-        H_init_vec = H_init.flatten()
-
-        # Run optimization using Levenberg-Marquardt algorithm.
-        result = least_squares(
-            error_function, H_init_vec, args=(points1, points2, border1, border2),
-            method='lm'
-        )
-
-        # Retrieve the optimized H vector.
-        H_optimized = result.x.reshape(3, 3)
-
-        print("Optmizied Homography Matrix:")
-        print(H_optimized)
-
-
-if __name__ == "__main__":
+    def __init__(self):
+        self.left_image = None
+        self.right_image = None
+        self.segmentation_map = None
+        self.reference_img = None
+        self.reference_size = None
+        self.point_cloud = None
+        self.display = False
     
-    img1 = load_image('test/img1.jpg', max_size=120000)
-    img2 = load_image('test/img1.jpg', max_size=120000)
+    def __call__(self, left_image, right_image, segmentation_map, reference_img, reference_size, display=False):
+        self.left_image = left_image
+        self.right_image = right_image
+        self.segmentation_map = segmentation_map
+        self.reference_img = reference_img
+        self.reference_size = reference_size
+        self.display = display
 
-    plate_detector = PlateDetector()
+        self.estimate_volume()
 
-    _, border1 = plate_detector(img1, scale=1.0)
-    _, border2 = plate_detector(img2, scale=1.0)
+    def segment_point_cloud(self):
+        segments = {}
+        unique_labels = np.unique(self.segmentation_map)
+        for label in unique_labels:
+            mask = self.segmentation_map == label
+            segment = self.point_cloud[mask]
+            segments[label] = segment
 
-    volume_estimator = VolumeEstimator(img1, img2, border1, border2)
-    volume_estimator.extrinsic_calibration()
+        return segments
+    
+    def estimate_volume(self):
+        # Get disparity map
+        disp = compute_disparity(self.left_image,
+                                self.right_image,
+                                block_size=11,
+                                min_disp=8,
+                                num_disp=16,
+                                disp_12_max_diff=12,
+                                P1=638,
+                                P2=1645,
+                                uniqueness_ratio=0,
+                                speckle_window_size=0,
+                                speckle_range=0)
+
+        # Generate 3D point cloud
+        height, width = self.left_image.shape[:2]
+        focal_length = 0.8 * width
+        points, colors = generate_3d_point_cloud(self.left_image, height, width, focal_length, disp)
+
+        # Display 3D reconstruncted image
+        if self.display:
+            visualize_3d_point_cloud(points, colors)

@@ -1,5 +1,5 @@
 import os
-import cv2
+import cv2 as cv
 import numpy as np
 from tqdm import tqdm
 
@@ -45,8 +45,8 @@ def load_food101(data_path, image_size=(224, 224), num_samples_per_category=None
             image_path = os.path.join(category_path, image_file)
             
             # Load and preprocess the image using OpenCV
-            image = cv2.imread(image_path)
-            image = cv2.resize(image, image_size)  # Resize the image
+            image = cv.imread(image_path)
+            image = cv.resize(image, image_size)  # Resize the image
             
             # Append the image and label
             X.append(image)

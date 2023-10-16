@@ -1,4 +1,5 @@
-import cv2
+import os
+import cv2 as cv
 import torch
 import torch.nn as nn
 import numpy as np
@@ -7,19 +8,20 @@ import matplotlib.pyplot as plt
 import torchvision.models as models
 import torchvision.transforms as transforms
 
-from joblib import dump, load
-from PIL import Image
-
+from joblib import load
 from skimage.color import label2rgb
 
-from utils.read_write import load_image
-from .plate_detection import PlateDetector
-from .food_segmentation import FoodSegmenter
+from utils.recongnition import extract_features
 
 
 class FoodRecognizer:
     def __init__(self, model="inception_v3"):
-        
+        self.model_name = model
+        self.img = None
+        self.segmentation_map = None
+        self.merged_segmentation_map = None
+        self.display = False
+
         # Load trained model
         if model == "inception_v3":
             self.model = models.inception_v3(weights='IMAGENET1K_V1')
@@ -33,9 +35,10 @@ class FoodRecognizer:
                 nn.Softmax(dim=1)
             )
 
-            self.model.load_state_dict(torch.load(
-                'best_models/inception_v3.pth',
-                map_location=torch.device('cpu')))
+            self.model.load_state_dict(
+                torch.load('best_models/inception_v3.pth',
+                map_location=torch.device('cpu'))
+            )
 
             self.model.eval()
 
@@ -44,6 +47,12 @@ class FoodRecognizer:
 
         else:
             raise ValueError("Classification model not supported. Please use 'inception_v3' or 'svm'.")
+    
+    def __call__(self, img, segmentation_map, display=False):
+        self.img = img
+        self.segmentation_map = segmentation_map
+        self.display = display
+        return self.extract_and_predict()
     
     def preprocess_segment(self, segment):
         preprocess = transforms.Compose([
@@ -56,43 +65,83 @@ class FoodRecognizer:
         return preprocess(segment)
     
     def predict(self, segment):
-        input_tensor = self.preprocess_segment(segment).unsqueeze(0)  # add batch dim
-        with torch.no_grad():
-            output = self.model(input_tensor)
-        return output
+
+        if self.model_name == "inception_v3":
+            input_tensor = self.preprocess_segment(segment).unsqueeze(0)  # add batch dim
+            with torch.no_grad():
+                return self.model(input_tensor)
+        
+        if self.model_name == "svm":
+
+            # Save the found segment in a temporary folder (for further prediction)
+            if not os.path.exists("tmp"):   # Ensure the "tmp/" directory exists
+                os.makedirs("tmp")
+            filename = f"tmp/segment.jpg"
+            cv.imwrite(filename, cv.cvtColor(cv.convertScaleAbs(segment), cv.COLOR_RGB2BGR))
+
+            segment_img = cv.imread(filename)
+            segment_feat = np.array([extract_features(segment_img)])
+            return self.model.predict(segment_feat)
     
-    def extract_and_predict(self, image, segments):
-        for i, seg_val in enumerate(np.unique(segments)):
+    def extract_and_predict(self):
+
+        # Convert input image to RGB
+        img_rgb = cv.cvtColor(self.img, cv.COLOR_BGR2RGB)
+
+        # Init the merged segmentation map, where segments classified with the
+        # same labels are merged. The pixel values in this new segmentation map
+        # represent the predicted label value.
+        self.merged_segmentation_map = np.zeros_like(self.segmentation_map)
+
+        for i, seg_val in enumerate(np.unique(self.segmentation_map)):
             if i == 0:      # Discard background
                 continue
 
-            mask = np.zeros_like(segments)
-            mask[segments == seg_val] = 1
+            mask = np.zeros_like(self.segmentation_map)
+            mask[self.segmentation_map == seg_val] = 1
             
             # Extract region and preprocess
-            region = image * np.expand_dims(mask, axis=-1)      # Extract region
+            region = img_rgb * np.expand_dims(mask, axis=-1)    # Extract region
             region = region[np.ix_(mask.any(1),mask.any(0))]    # Crop to bounding box
-            
+
             # Predict
             prediction = self.predict(region)
             predicted_label = prediction.argmax().item()
 
+            # Update the merged segmentation map
+            self.merged_segmentation_map[mask == 1] = predicted_label
+
             # Display
-            self.display_segment(region, predicted_label)
-            print("Segment:", seg_val, "Prediction:", predicted_label)
+            if self.display:
+                self.display_segment(region, predicted_label)
+                print("Segment:", seg_val, "Prediction:", predicted_label)
 
 
-    def _extract_and_predict(self, image, segments):
-        for i, seg_val in enumerate(np.unique(segments)):
+        if self.display:
+            self.visualize_results()
+
+        return self.merged_segmentation_map
+
+
+    def _extract_and_predict(self):
+        # Convert input image to RGB
+        img_rgb = cv.cvtColor(self.img, cv.COLOR_BGR2RGB)
+
+        # Init the merged segmentation map, where segments classified with the
+        # same labels are merged. The pixel values in this new segmentation map
+        # represent the predicted label value.
+        self.merged_segmentation_map = np.zeros_like(self.segmentation_map)
+
+        for i, seg_val in enumerate(np.unique(self.segmentation_map)):
             if i == 0:      # Discard background
                 continue
 
-            mask = np.zeros_like(segments)
-            mask[segments == seg_val] = 1
+            mask = np.zeros_like(self.segmentation_map)
+            mask[self.segmentation_map == seg_val] = 1
             
             # Extract region and preprocess
-            region = image * np.expand_dims(mask, axis=-1)  # Extract region
-            region_background = image * np.expand_dims(1-mask, axis=-1) # Extract inverse region (background)
+            region = img_rgb * np.expand_dims(mask, axis=-1)  # Extract region
+            region_background = img_rgb * np.expand_dims(1-mask, axis=-1) # Extract inverse region (background)
             region = region + region_background # Combine to keep original background
             
             # Crop to bounding box
@@ -105,9 +154,19 @@ class FoodRecognizer:
             prediction = self.predict(region)
             predicted_label = prediction.argmax().item()
 
+            # Update the merged segmentation map
+            self.merged_segmentation_map[mask == 1] = predicted_label
+
             # Display
-            self.display_segment(region, predicted_label)
-            print("Segment:", seg_val, "Prediction:", predicted_label)
+            if self.display:
+                self.display_segment(region, predicted_label)
+                print("Segment:", seg_val, "Prediction:", predicted_label)
+
+        
+        if self.display:
+            self.visualize_results()
+
+        return self.merged_segmentation_map
 
 
     def display_segment(self, segment, predicted_label):
@@ -118,39 +177,18 @@ class FoodRecognizer:
         plt.show()
 
     
-    def visualize_results(self, image_rgb, image_segments, merged_segments=None):
+    def visualize_results(self):
+        img_rgb = cv.cvtColor(self.img, cv.COLOR_BGR2RGB)
         plt.subplot(1,3,1)
-        plt.imshow(image_rgb)
+        plt.imshow(img_rgb)
         plt.title('Original Image')
 
         plt.subplot(1,3,2)
-        plt.imshow(label2rgb(image_segments, image_rgb, kind='avg'))
+        plt.imshow(label2rgb(self.segmentation_map, img_rgb, kind='avg'))
         plt.title('SLIC Segments')
 
-        if merged_segments is not None:
-            plt.subplot(1,3,3)
-            plt.imshow(label2rgb(merged_segments, image_rgb, kind='avg'))
-            plt.title('Merged Segments')
+        plt.subplot(1,3,3)
+        plt.imshow(label2rgb(self.merged_segmentation_map, img_rgb, kind='avg'))
+        plt.title('Merged Segments')
         
         plt.show()
-
-
-if __name__ == "__main__":
-
-    # Load sample image
-    path = "test/test_dish_4.jpg"
-    image = load_image(path, max_size=120000)
-    
-    # Init modules
-    plate_detector = PlateDetector()
-    food_segmenter = FoodSegmenter(slic=True)
-    food_recognizer = FoodRecognizer(model='inception_v3')
-
-    # Segment food
-    _, plate_mask = plate_detector.detect_plate_and_mask(image, scale=1.0)
-    image_segments = food_segmenter(image, plate_mask, display=True)
-
-    # Classfy food
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    merged_segments = food_recognizer.extract_and_predict(image_rgb, image_segments)
-    food_recognizer.visualize_results(image_rgb, image_segments, merged_segments)

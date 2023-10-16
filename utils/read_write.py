@@ -1,4 +1,4 @@
-import cv2
+import cv2 as cv
 import numpy as np
 
 def load_image(img_path, max_size=None, cvt=None):
@@ -17,9 +17,9 @@ def load_image(img_path, max_size=None, cvt=None):
     
     # Read the image.
     if cvt is not None:
-        img = cv2.imread(img_path, cvt)
+        img = cv.imread(img_path, cvt)
     else:
-        img = cv2.imread(img_path)
+        img = cv.imread(img_path)
 
     # Get the current dimensions.
     if img.ndim == 3:
@@ -42,6 +42,6 @@ def load_image(img_path, max_size=None, cvt=None):
     new_height = int(height * scaling_factor)
     
     # Resize the image.
-    resized_img = cv2.resize(img, (new_width, new_height))
+    resized_img = cv.resize(img, (new_width, new_height))
     
     return resized_img

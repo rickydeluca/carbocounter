@@ -1,10 +1,9 @@
-import cv2
+import random
+import cv2 as cv
 import numpy as np
 
-import cv2
-import numpy as np
 
-def salient_orb_matching(image1, image2, n_keypoints=500, knn_matches_ratio=0.75):
+def salient_points_matching_orb(image1, image2, n_keypoints=500, knn_matches_ratio=0.75):
     """
     Matches salient points between two images using ORB descriptor and k-NN matching.
 
@@ -20,7 +19,7 @@ def salient_orb_matching(image1, image2, n_keypoints=500, knn_matches_ratio=0.75
         list: List of point coordinates from image2.
     """
     # Initialize ORB detector
-    orb = cv2.ORB_create(n_keypoints)
+    orb = cv.ORB_create(n_keypoints)
     
     # Find the keypoints and descriptors with ORB
     keypoints1, descriptors1 = orb.detectAndCompute(image1, None)
@@ -35,7 +34,7 @@ def salient_orb_matching(image1, image2, n_keypoints=500, knn_matches_ratio=0.75
     search_params = dict(checks=50)
     
     # Apply FLANN based matcher with k=2
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    flann = cv.FlannBasedMatcher(index_params, search_params)
     matches = flann.knnMatch(descriptors1, descriptors2, k=2)
     
     # Need to draw only good matches, so create a mask
@@ -54,16 +53,16 @@ def salient_orb_matching(image1, image2, n_keypoints=500, knn_matches_ratio=0.75
                        matchesMask=matches_mask,
                        flags=0)
     
-    img_matches = cv2.drawMatchesKnn(image1, keypoints1, image2, keypoints2, matches, None, **draw_params)
+    img_matches = cv.drawMatchesKnn(image1, keypoints1, image2, keypoints2, matches, None, **draw_params)
 
     # Extract the coordinates of matched points
     points1 = np.float32([keypoints1[m.queryIdx].pt for (m, n) in good_matches]).reshape(-1, 1, 2)
     points2 = np.float32([keypoints2[m.trainIdx].pt for (m, n) in good_matches]).reshape(-1, 1, 2)
 
-    return img_matches, points1, points2
+    return img_matches, points1, points2, good_matches
 
 
-def salient_points_matching(image1, image2, min_hessian=400, knn_matches_ratio=0.75):
+def salient_points_matching_surf(image1, image2, min_hessian=400, knn_matches_ratio=0.75):
     """
     Matches salient points between two images using SURF descriptor and k-NN matching.
 
@@ -79,7 +78,7 @@ def salient_points_matching(image1, image2, min_hessian=400, knn_matches_ratio=0
         list: List of point coordinates from image2.
     """
     # Initialize SURF detector
-    surf = cv2.xfeatures2d.SURF_create(hessianThreshold=min_hessian)
+    surf = cv.xfeatures2d.SURF_create(hessianThreshold=min_hessian)
     
     # Find the keypoints and descriptors with SURF
     keypoints1, descriptors1 = surf.detectAndCompute(image1, None)
@@ -91,7 +90,7 @@ def salient_points_matching(image1, image2, min_hessian=400, knn_matches_ratio=0
     search_params = dict(checks=50)
     
     # Apply FLANN based matcher with k=2
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    flann = cvFlannBasedMatcher(index_params, search_params)
     matches = flann.knnMatch(descriptors1, descriptors2, k=2)
     
     # Need to draw only good matches, so create a mask
@@ -109,7 +108,7 @@ def salient_points_matching(image1, image2, min_hessian=400, knn_matches_ratio=0
                        matchesMask=matches_mask,
                        flags=0)
     
-    img_matches = cv2.drawMatchesKnn(image1, keypoints1, image2, keypoints2, matches, None, **draw_params)
+    img_matches = cv.drawMatchesKnn(image1, keypoints1, image2, keypoints2, matches, None, **draw_params)
     
 
     # Extract the coordinates of matched points
@@ -118,6 +117,29 @@ def salient_points_matching(image1, image2, min_hessian=400, knn_matches_ratio=0
 
     return img_matches, points1, points2
 
+
+def random_sample(matches, sample_size=5):
+    return random.sample(matches, sample_size)
+
+def generate_models(points1, points2):
+    # Note: points1 and points2 should be corresponding points from the sampled matches
+    E, mask = cv.findEssentialMat(points1, points2, method=cv.RANSAC, prob=0.999, threshold=1.0)
+    return E, mask
+
+def evaluate_models(generated_models, matches):
+    # Implement model evaluation
+    pass
+
+def refine_model(best_model, inlier_matches):
+    # Implement Levenberg-Marquardt optimization
+    pass
+
+def create_point_cloud(refined_model, inlier_matches):
+    # Implement point cloud creation
+    pass
+
+def extract_relative_pose():
+    pass
 
 def error_function(H_vec, points1, points2, border1, border2):
     """
@@ -157,11 +179,11 @@ def error_function(H_vec, points1, points2, border1, border2):
     points2 = np.asarray(points2).reshape(-1, 2).astype(np.float32)
     
     # Compute residuals for feature points
-    projected_points = cv2.perspectiveTransform(points1.reshape(-1, 1, 2), H)
+    projected_points = cv.perspectiveTransform(points1.reshape(-1, 1, 2), H)
     residuals_points = (projected_points - points2.reshape(-1, 1, 2)).flatten()
     
     # Compute residuals for border points
-    projected_border = cv2.perspectiveTransform(border1.reshape(-1, 1, 2), H)
+    projected_border = cv.perspectiveTransform(border1.reshape(-1, 1, 2), H)
     residuals_border = (projected_border - border2.reshape(-1, 1, 2)).flatten()
     
     # Concatenate residuals
