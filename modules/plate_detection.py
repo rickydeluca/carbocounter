@@ -1,5 +1,5 @@
 import cv2 as cv
-import imutils
+# import imutils
 import numpy as np
 
 
@@ -85,9 +85,16 @@ class PlateDetector:
             upDiff=1
         )
 
-        # Find contours, and get the contour with maximum area
-        cnts = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
-        cnts = imutils.grab_contours(cnts)
+        # Find contours
+        contours_info = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
+
+        # Handle the returned tuple based on its length
+        if len(contours_info) == 3:
+            _, cnts, _ = contours_info
+        else:
+            cnts, _ = contours_info
+
+        # Get the contour with maximum area
         c = max(cnts, key=cv.contourArea)
 
         # Store plate coordinates

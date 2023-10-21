@@ -2,6 +2,8 @@
 import torch
 import torchvision.transforms as transforms
 import math
+import numpy as np
+import matplotlib.pyplot as plt
 
 def rescale_tensor_image(image_tensor, max_pixels):
     """
@@ -43,3 +45,16 @@ def rescale_tensor_image(image_tensor, max_pixels):
     rescaled_image_tensor = resize_transform(image_tensor)
     
     return rescaled_image_tensor
+
+
+def imshow(img, title=None):
+    # Convert from tensor to numpy, and de-normalize
+    img = img.numpy().transpose((1, 2, 0))
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    img = std * img + mean
+    img = np.clip(img, 0, 1)
+    plt.imshow(img)
+    if title is not None:
+        plt.title(title)
+    plt.pause(0.001)  # Pause a bit so that plots are updated
