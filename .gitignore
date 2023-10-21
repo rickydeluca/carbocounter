@@ -1,6 +1,7 @@
 best_models/
 data/
 test/
+tmp/
 
 datasets/__pycache__
 models/__pycache__
@@ -8,5 +9,6 @@ modules/__pycache__
 utils/__pycache__
 train_utils/__pycache__
 
-train_deeplabv3.py
 carbo-count.yml
+
+todo
