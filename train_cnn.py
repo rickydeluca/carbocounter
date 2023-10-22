@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import transforms, models
 from tqdm import tqdm
 
-from models.cnn import CNN
+from models.resnet import CNN
 from datasets.food101_dataset import Food101Dataset, Food101Subset
 from train_utils.images import imshow
 
