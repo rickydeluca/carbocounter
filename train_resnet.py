@@ -26,7 +26,7 @@ def parse_args():
         description='Given two stereo images representing the same dish, segment the different foods and compute the quanity of carbohydrates within them.'
     )
     
-    parser.add_argument('--version', type=str, default='resent50', help='Which Resent version to use (default: resent50).')
+    parser.add_argument('--version', type=str, default='resnet50', help='Which Resnet version to use (default: resnet50).')
     parser.add_argument('--data_dir', type=str, default='data/food-101', help='Dataset directory (default: data/food-101).')
     parser.add_argument('--model_dir', type=str, default='best_models', help='Directory in which save the best trained model (default: best_models).')
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs (default: 25).')

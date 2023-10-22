@@ -9,21 +9,59 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 
 from joblib import load
+from PIL import Image
 from skimage.color import label2rgb
 
+from models.resnet import get_resnet
+from utils.classification import imshow
 from utils.recongnition import extract_features
 
 
+
 class FoodRecognizer:
-    def __init__(self, model="inception_v3"):
+    def __init__(self, model="resnet50", num_classes=104, class_names = None, device=None):
         self.model_name = model
+        self.num_classes = num_classes
+        self.class_names = class_names
         self.img = None
         self.segmentation_map = None
         self.merged_segmentation_map = None
+        self.device = device
         self.display = False
 
         # Load trained model
-        if model == "inception_v3":
+        if "resnet" in self.model_name:
+
+            # Get resnet version
+            self.model = get_resnet(self.model_name,
+                                    self.num_classes,
+                                    pretrained=True,
+                                    freeze_weights=True)
+            
+            # Load trained parameters
+            self.model.load_state_dict(torch.load(f"best_models/{self.model_name}.pth"))
+            self.model = self.model.to(self.device)
+            self.model.eval()
+
+            # Get data transformations
+            self.data_transforms = {
+
+                'train': transforms.Compose([
+                    transforms.RandomResizedCrop(224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                ]),
+
+                'val': transforms.Compose([
+                    transforms.Resize(256),
+                    transforms.CenterCrop(224),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                ]),
+            }
+
+        elif self.model_name == "inception_v3":
             self.model = models.inception_v3(weights='IMAGENET1K_V1')
             self.model.fc = nn.Sequential(
                 nn.BatchNorm1d(2048, eps=0.001, momentum=0.01),
@@ -42,11 +80,11 @@ class FoodRecognizer:
 
             self.model.eval()
 
-        elif model == "svm":
+        elif self.model_name == "svm":
             self.model = load('best_models/svm.joblib')
 
         else:
-            raise ValueError("Classification model not supported. Please use 'inception_v3' or 'svm'.")
+            raise ValueError("Classification model not supported. Please use 'resnet<18, 50 or 101>' 'inception_v3' or 'svm'.")
     
     def __call__(self, img, segmentation_map, display=False):
         self.img = img
@@ -65,8 +103,29 @@ class FoodRecognizer:
         return preprocess(segment)
     
     def predict(self, segment):
+        
+        if "resnet" in self.model_name:
+            
+            # DEBUG: Segment type and shape
+            # print("Segment shape:", segment.shape)
+            # print("Segment type:", segment.dtype)
+            # print("Is ndarray?:", isinstance(segment, np.ndarray))
 
-        if self.model_name == "inception_v3":
+            # Convert RGB segment to PIL image
+            segment = transforms.ToPILImage()(segment.astype(np.uint8))
+
+            # Apply transformation (in test mode)
+            segment = self.data_transforms['val'](segment)
+            segment = segment.unsqueeze(0)
+            segment = segment.to(self.device)
+
+            # Make prediction
+            with torch.no_grad():
+                outputs = self.model(segment)
+                _, preds = torch.max(outputs, 1)                
+                return preds[0]
+
+        elif self.model_name == "inception_v3":
             input_tensor = self.preprocess_segment(segment).unsqueeze(0)  # add batch dim
             with torch.no_grad():
                 return self.model(input_tensor)
@@ -106,10 +165,10 @@ class FoodRecognizer:
 
             # Predict
             prediction = self.predict(region)
-            predicted_label = prediction.argmax().item()
+            predicted_label = self.class_names[int(prediction.item())]
 
             # Update the merged segmentation map
-            self.merged_segmentation_map[mask == 1] = predicted_label
+            self.merged_segmentation_map[mask == 1] = prediction
 
             # Display
             if self.display:

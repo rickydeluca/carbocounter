@@ -23,7 +23,7 @@ def deeplabv3(backbone, num_classes=104, pretrained=True, freeze_weights=True, p
         model = deeplabv3_mobilenet_v3_large(weights=weights, progress=progress)
         
     else:
-        raise ValueError("No valid 'backbone', please choose from: 'resent50', 'resnet101' and 'mobilenet_v3_large'")
+        raise ValueError("No valid 'backbone', please choose from: 'resnet50', 'resnet101' and 'mobilenet_v3_large'")
     
     
     if freeze_weights:
