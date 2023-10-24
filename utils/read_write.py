@@ -1,7 +1,7 @@
 import cv2 as cv
 import numpy as np
 
-def load_image(img_path, max_size=None, cvt=None):
+def load_image(img_path, resize_dims=None, max_size=None, cvt=None):
     """
     Rescale the input image while preserving its aspect ratio such that its 
     total number of pixels is less than or equal to "max_size".
@@ -27,6 +27,10 @@ def load_image(img_path, max_size=None, cvt=None):
     else:
         height, width, = img.shape
     
+    if resize_dims is not None:
+        resized_img = cv.resize(img, resize_dims)
+        return resized_img
+
     # Calculate the current number of pixels.
     current_pixels = height * width
     

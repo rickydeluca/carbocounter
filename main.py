@@ -5,7 +5,7 @@ import numpy as np
 from modules.plate_detection import PlateDetector
 from modules.food_segmentation import FoodSegmenter
 from modules.food_recognition import FoodRecognizer
-from modules.volume_estimation import VolumeEstimator
+from modules.volume_estimation_v2 import VolumeEstimator
 
 from utils.read_write import load_image
 
@@ -45,8 +45,8 @@ def main():
     device = torch.device("cpu")
 
     # Load images
-    left_image = load_image(args.left_image)
-    right_image = load_image(args.right_image)
+    left_image = load_image(args.left_image, resize_dims=(640, 480))
+    right_image = load_image(args.right_image, resize_dims=(640, 480))
 
     # Init framework modules
     plate_detector = PlateDetector()
@@ -55,13 +55,14 @@ def main():
                                      num_classes=104,
                                      class_names=idx2class,
                                      device=device)
-    volume_estimator = VolumeEstimator()
+    volume_estimator = VolumeEstimator(inference_dataset='nyu')
 
     # Run framework
     plate_coords, plate_mask = plate_detector(left_image)
     segmentation_map = food_segmenter(left_image, plate_mask, display=args.verbose)
     segmentation_map = food_recognizer(left_image, segmentation_map, display=args.verbose)
-    volume_estimator(left_image, right_image, segmentation_map, reference_img=None, reference_size=None, display=True)
+    # volume_estimator(left_image, right_image, segmentation_map, reference_img=None, reference_size=None, display=True)    # V1
+    volume_estimator(left_image, segmentation_map, display=args.verbose)
 
 if __name__ == "__main__":
     main()

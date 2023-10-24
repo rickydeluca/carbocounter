@@ -76,7 +76,8 @@ class FoodSegmenter:
             image_segments_filtered = clear_border(image_segments, mask=self.plate_mask)
 
             # Region growing
-            image_segments_merged = expand_labels(image_segments_filtered, distance=10)
+            # image_segments_merged = expand_labels(image_segments_filtered, distance=10)
+            image_segments_merged = image_segments_filtered
             
             if display:                 # Display output
                 

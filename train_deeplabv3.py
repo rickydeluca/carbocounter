@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from models.deeplabv3 import deeplabv3
-from utils.segmentation_training import set_reproducibility, train_model, get_transforms, different_batch_size_collate_fn
+from utils.semantic_segmentation import set_reproducibility, train_model, get_transforms, different_batch_size_collate_fn
 from datasets.foodseg103_dataset import FoodSeg103SemanticDataset
 
 def main():

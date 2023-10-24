@@ -14,7 +14,7 @@ from torchvision import tv_tensors
 from torchvision.transforms.v2 import functional as F
 from PIL import Image
 
-from utils.segmentation_training import tensor_image_show
+from utils.semantic_segmentation import tensor_image_show
 
 
 # class FoodSeg103Dataset_Instance(Dataset):
