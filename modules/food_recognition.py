@@ -90,7 +90,7 @@ class FoodRecognizer:
         self.img = img
         self.segmentation_map = segmentation_map
         self.display = display
-        return self.extract_and_predict()
+        return self.extract_and_predict_crop()
     
     def preprocess_segment(self, segment):
         preprocess = transforms.Compose([
@@ -141,7 +141,8 @@ class FoodRecognizer:
             segment_img = cv.imread(filename)
             segment_feat = np.array([extract_features(segment_img)])
             return self.model.predict(segment_feat)
-    
+
+
     def extract_and_predict(self):
 
         # Convert input image to RGB
@@ -167,7 +168,7 @@ class FoodRecognizer:
             prediction = self.predict(region)
             predicted_label = self.class_names[int(prediction.item())]
 
-            # Update the merged segmentation map
+            # Update the merged segmentation map and the predictions dictionary
             self.merged_segmentation_map[mask == 1] = prediction
 
             # Display
@@ -182,7 +183,53 @@ class FoodRecognizer:
         return self.merged_segmentation_map
 
 
-    def _extract_and_predict(self):
+    def extract_and_predict_white(self):
+
+        # Convert input image to RGB
+        img_rgb = cv.cvtColor(self.img, cv.COLOR_BGR2RGB)
+
+        # Init the merged segmentation map, where segments classified with the
+        # same labels are merged. The pixel values in this new segmentation map
+        # represent the predicted label value.
+        self.merged_segmentation_map = np.zeros_like(self.segmentation_map)
+
+        for i, seg_val in enumerate(np.unique(self.segmentation_map)):
+            if i == 0:      # Discard background
+                continue
+
+            mask = np.zeros_like(self.segmentation_map)
+            mask[self.segmentation_map == seg_val] = 1
+
+            # Setting the background to white
+            white_background = np.ones_like(img_rgb) * 255
+            region = white_background - (white_background * np.expand_dims(mask, axis=-1))
+
+            # Extract region
+            region += img_rgb * np.expand_dims(mask, axis=-1)
+
+            # Crop to bounding box
+            region = region[np.ix_(mask.any(1),mask.any(0))]
+
+            # Predict
+            prediction = self.predict(region)
+            predicted_label = self.class_names[int(prediction.item())]
+
+            # Update the merged segmentation map and the predictions dictionary
+            self.merged_segmentation_map[mask == 1] = prediction
+
+            # Display
+            if self.display:
+                self.display_segment(region, predicted_label)
+                print("Segment:", seg_val, "Prediction:", predicted_label)
+
+
+        if self.display:
+            self.visualize_results()
+
+        return self.merged_segmentation_map
+
+
+    def extract_and_predict_crop(self):
         # Convert input image to RGB
         img_rgb = cv.cvtColor(self.img, cv.COLOR_BGR2RGB)
 
@@ -211,10 +258,10 @@ class FoodRecognizer:
             
             # Predict
             prediction = self.predict(region)
-            predicted_label = prediction.argmax().item()
+            predicted_label = self.class_names[int(prediction.item())]
 
-            # Update the merged segmentation map
-            self.merged_segmentation_map[mask == 1] = predicted_label
+            # Update the merged segmentation map and the predictions dictionary
+            self.merged_segmentation_map[mask == 1] = prediction
 
             # Display
             if self.display:

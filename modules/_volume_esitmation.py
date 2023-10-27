@@ -57,7 +57,7 @@ class VolumeEstimator:
     def get_segment_volumes(self):
         volumes = {}
         hull_meshes = []
-        conversion_factor = 1_000_000   # cubic meters to milliliters
+        conversion_factor = 1_000_000_000   # cubic meters to milliliters
 
         # DEBUG
         print("segment labels:", self.segmented_pcds.keys(), end="\n\n")
@@ -77,38 +77,43 @@ class VolumeEstimator:
         return volumes, hull_meshes
 
 
-    def interpolate_depth_edges(self, depth_map, segmentation_map):
-        """Interpola i bordi del cibo nella mappa di profondità."""
-        
-        # Assicuriamoci che la segmentation_map sia a 8-bit
-        segmentation_map_8bit = (segmentation_map * 255).astype(np.uint8)
-
-        # Individua i bordi del cibo
-        edges = cv.Canny(segmentation_map_8bit, 100, 200) > 0
-
-        # Crea una maschera di distanza dal bordo
-        dist_transform = cv.distanceTransform(1 - edges.astype(np.uint8), cv.DIST_L2, 5)
-        normalized_distance = cv.normalize(dist_transform, None, 0, 1, cv.NORM_MINMAX)
-
-        # Interpola la depth map
-        alpha = 0.5  # puoi variare questo valore per modificare l'intensità dell'effetto
-        interpolated_depth = alpha * normalized_distance + (1 - alpha) * depth_map / depth_map.max()
-        interpolated_depth = (interpolated_depth * depth_map.max()).astype(np.uint8)
-        
-        return interpolated_depth
+    def smooth_mask(self, mask, kernel_size=3):
+        kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        # Closing
+        closed = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
+        # Opening
+        opened = cv.morphologyEx(closed, cv.MORPH_OPEN, kernel)
+        return opened
 
 
     def segment_depth_map(self, depth_map):
         # Create background mask
         background_mask = self.segmentation_map == 0
-        food_mask = self.segmentation_map != 0
 
-        # Move the plate and the background to the maximum depth
+        # Get the max depth value for setting the background
         max_depth = np.max(depth_map)
+
+        # Create a mask for the current food class
+        food_mask = self.segmentation_map != 0
+            
+        # Smooth the mask's contours
+        food_mask_smoothed = self.smooth_mask(np.uint8(food_mask))
+
+        # Compute the distance transform on the smoothed food mask
+        distance_transform = cv.distanceTransform(food_mask_smoothed, cv.DIST_L2, 3)
+
+        # Normalize the distance transform to range [0, 1]
+        max_distance = np.max(distance_transform)
+        normalized_distance = distance_transform / max_distance
+
+        # Interpolate between the original depth values and the max depth
+        interpolated_depth = depth_map * normalized_distance + max_depth * (1 - normalized_distance)
+
+        # Apply the interpolated depth to the current food region
+        depth_map[food_mask] = interpolated_depth[food_mask]
+
+        # Set the background to the max depth
         depth_map[background_mask] = max_depth
-        
-        # Apply the depth interpolation on the food edges
-        depth_map[food_mask] = self.interpolate_depth_edges(depth_map[food_mask], self.segmentation_map[food_mask])
 
         return depth_map
     
@@ -129,7 +134,7 @@ class VolumeEstimator:
         # Rescale the depth
         min_original_depth = np.min(depth_map)
         max_original_depth = np.max(depth_map)
-        depth_map = np.vectorize(self.rescale_depth)(depth_map, min_original_depth, max_original_depth, 38, 40).astype(np.float32)
+        depth_map = np.vectorize(self.rescale_depth)(depth_map, min_original_depth, max_original_depth, 37, 40).astype(np.float32)
 
         # # DEBUG
         # print("min depth: ", np.min(depth_map))

@@ -113,16 +113,16 @@ def main():
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     # Train the model and get the best obe
-    best_model = train_model(model=model,
-                             criterion=criterion,
-                             optimizer=optimizer,
-                             scheduler=exp_lr_scheduler,
-                             dataloaders=dataloaders,
-                             dataset_sizes=dataset_sizes,
-                             device=device,
-                             num_epochs=args.epochs)
+    model = train_model(model=model,
+                        criterion=criterion,
+                        optimizer=optimizer,
+                        scheduler=exp_lr_scheduler,
+                        dataloaders=dataloaders,
+                        dataset_sizes=dataset_sizes,
+                        device=device,
+                        num_epochs=args.epochs)
 
-    visualize_model(model=best_model,
+    visualize_model(model=model,
                     num_images=6,
                     class_names=class_names,
                     dataloaders=dataloaders,
@@ -134,7 +134,7 @@ def main():
     torch.save(model.state_dict(), args.model_dir + "/" + args.version + ".pth")
 
     # Visualize model predictions
-    visualize_model_predictions(model=best_model,
+    visualize_model_predictions(model=model,
                                 img_path=args.data_dir + "/train/cannoli/526.jpg",
                                 data_transforms=data_transforms,
                                 class_names=class_names,

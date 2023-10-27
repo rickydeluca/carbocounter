@@ -1,266 +1,165 @@
+"""
+source: https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+"""
+import os
+import time
 import torch
+import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 
-from torchvision import transforms as T
-from PIL import Image
 from tqdm import tqdm
-
-class EarlyStopping:
-    def __init__(self, patience=7, verbose=False, delta=0, path='checkpoint.pth'):
-        """
-        Args:
-            patience (int): How long to wait after last time validation loss improved.
-                            Default: 7
-            verbose (bool): If True, prints a message for each validation loss improvement.
-                            Default: False
-            delta (float): Minimum change in the monitored quantity to qualify as an improvement.
-                            Default: 0
-            path (str): Path for the checkpoint to be saved to.
-                            Default: 'checkpoint.pth.tar'
-        """
-        self.patience = patience
-        self.verbose = verbose
-        self.counter = 0
-        self.best_score = None
-        self.early_stop = False
-        self.val_loss_min = float('inf')
-        self.delta = delta
-        self.path = path
-
-    def __call__(self, val_loss, model):
-
-        score = -val_loss
-
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model)
-        elif score < self.best_score + self.delta:
-            self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model)
-            self.counter = 0
-
-    def save_checkpoint(self, val_loss, model):
-        '''Saves model when validation loss decreases.'''
-        if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), self.path)
-        self.val_loss_min = val_loss
+from PIL import Image
+from tempfile import TemporaryDirectory
+from sklearn.metrics import jaccard_score
 
 
-def set_reproducibility(seed):
-    """
-    Set seed for random operation to ensure reproducibility.
-    """
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-
-
-def get_transforms(mode='train'):
-    """
-    Get the data transforms both for input images and target annotations
-    in a dictionary. 
-
-    The function returns different transforms if we are in 'train' or 'test' mode.    
-    """
-
-    transforms = {}
-
-    if mode == 'train':
-        transforms['image'] = T.Compose([
-            T.ToPILImage(),
-            # T.Resize(224),
-            T.RandomResizedCrop((224,224)),
-            T.RandomHorizontalFlip(p = 0.5),
-            # T.ColorJitter(brightness = .5, hue = .3),
-            T.ToTensor(),
-            T.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-        ])
-
-        transforms['mask'] = T.Compose([
-            T.ToPILImage(),
-            T.Resize((224,224)),
-            T.ToTensor()
-        ])
-
-        return transforms
+def compute_mIoU(preds, labels, num_classes):
+    preds = preds.cpu().numpy().reshape(-1)
+    labels = labels.cpu().numpy().reshape(-1)
     
-    if mode == 'test':
-        transforms['image'] = T.Compose([
-            T.ToPILImage(),
-            T.Resize((224,224)),
-            T.ToTensor(),
-            T.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-        ])
-
-        transforms['mask'] = T.Compose([
-            T.ToPILImage(),
-            T.Resize((224,224)),
-            T.ToTensor()
-        ])
-
-        return transforms
+    iou_list = []
+    for cls in range(num_classes):
+        iou = jaccard_score(labels, preds, labels=[cls], average='macro', zero_division=0)
+        iou_list.append(iou)
     
-    raise ValueError("No valid 'mode' attribute. It must be 'train' or 'test'.")
+    return np.mean(iou_list)
 
 
-def different_batch_size_collate_fn(batch):
-    return tuple(zip(*batch))
+def train_model(model=None, criterion=None, optimizer=None, scheduler=None, dataloaders=None, dataset_sizes=None, device=None, num_classes=104, num_epochs=25):
+
+    since = time.time()
+
+    # Create a temporary directory to save training checkpoints
+    with TemporaryDirectory() as tempdir:
+        best_model_params_path = os.path.join(tempdir, 'best_model_params.pt')
+
+        torch.save(model.state_dict(), best_model_params_path)
+        best_iou = 0.0
+
+        for epoch in range(num_epochs):
+            print(f'Epoch {epoch}/{num_epochs - 1}')
+            print('-' * 10)
+
+            # Each epoch has a training and validation phase
+            for phase in ['train', 'test']:
+                if phase == 'train':
+                    model.train()  # Set model to training mode
+                else:
+                    model.eval()   # Set model to evaluate mode
+
+                running_loss = 0.0
+
+                # Iterate over data.
+                for inputs, labels in tqdm(dataloaders[phase], desc=f"Epoch {epoch+1}/{num_epochs} {phase}", unit="batch"):
+                    inputs = inputs.to(device)
+                    labels = labels.to(device).to(torch.long)
+
+                    # zero the parameter gradients
+                    optimizer.zero_grad()
+
+                    # forward
+                    # track history if only in train
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs_dict = model(inputs)
+                        outputs = outputs_dict['out']  # Access the 'out' key to get the actual outputs
+                        preds = torch.argmax(outputs, dim=1)
+
+                        # DEBUG
+                        # print(f"unique labels: {torch.unique(labels)}")
+                        # print("***********************************")
+                        # print(f"outputs \t shape {outputs.shape} \t dtype: {outputs.dtype}")
+                        # print(f"labels \t shape {labels.shape} \t dtype: {labels.dtype}")
+                        # exit()
+
+                        loss = criterion(outputs, labels)
+
+                        # backward + optimize only if in training phase
+                        if phase == 'train':
+                            loss.backward()
+                            optimizer.step()
+
+                    # statistics
+                    running_loss += loss.item() * inputs.size(0)
 
 
-def train_model(model=None, dataloaders=None, num_classes=104,
-                device=None, criterion=None, optimizer=None,
-                scheduler=None, num_epochs=25, patience=7,
-                outfile='best_model_checkpoint.pth'):
-    """
-    Train a PyTorch model using the provided data and settings, with early stopping.
+                if phase == 'train':
+                    scheduler.step()
 
+                epoch_loss = running_loss / dataset_sizes[phase]
+                epoch_iou = compute_mIoU(preds, labels, num_classes)
 
-    Args:
-        model (torch.nn.Module): The PyTorch model to be trained.
-        dataloaders (dict): A dictionary containing the training and validation data loaders.
-        device (torch.device): The device (CPU or GPU) where the model will be trained.
-        criterion (torch.nn.Module): The loss function.
-        optimizer (torch.optim.Optimizer): The optimization algorithm.
-        scheduler (torch.optim.lr_scheduler._LRScheduler): The learning rate scheduler.
-        num_epochs (int, optional): Number of epochs for training. Defaults to 25.
-        patience (int, optional): Number of epochs with no improvement after which training stops. Defaults to 7.
-        outfile (str, optional): The path where the best model checkpoint will be saved. Defaults to 'best_model_checkpoint.pth.tar'.
+                print(f'{phase} Loss: {epoch_loss:.4f} IoU: {epoch_iou:.4f}')
 
-    Returns:
-        torch.nn.Module: The trained model.
-    """
+                # deep copy the model
+                if phase == 'test' and epoch_iou > best_iou:
+                    best_iou = epoch_iou
+                    torch.save(model.state_dict(), best_model_params_path)
 
-    # Initialize early stopping object
-    early_stopping = EarlyStopping(patience=patience, verbose=True, path=outfile)
+            print()
 
-    # Helper function to compute IoU
-    def compute_iou(pred, target, num_classes):
-        iou_list = []
-        pred = pred.view(-1)
-        target = target.view(-1)
+        time_elapsed = time.time() - since
+        print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
+        print(f'Best val IoU: {best_iou:4f}')
 
-        for cls in range(num_classes):
-            pred_inds = (pred == cls)
-            target_inds = (target == cls)
-            intersection = (pred_inds[target_inds]).sum().float()
-            union = pred_inds.sum().float() + target_inds.sum().float() - intersection
-            if union == 0:
-                iou_list.append(float('nan'))
-            else:
-                iou_list.append((intersection / union).item())
-        return iou_list
+        # load best model weights
+        model.load_state_dict(torch.load(best_model_params_path))
 
-    # Loop through each epoch
-    for epoch in range(num_epochs):
-        print('\nEpoch {}/{}'.format(epoch+1, num_epochs))
-        print('-' * 10)
-
-        # Storage for the IoU values
-        iou_values = {phase: [] for phase in ['train', 'val']}
-
-        # Iterate through both training and validation phases
-        for phase in ['train', 'val']:
-            if phase == 'train':
-                print("Training:", end=" ")
-                model.train()
-            else:
-                print("Evaluation:", end=" ")
-                model.eval()
-
-            running_loss = 0.0
-
-            # Iterate through the data batches
-            for inputs, labels in tqdm(dataloaders[phase], desc=f"Epoch {epoch+1}/{num_epochs} {phase}", unit="batch"):
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-
-                optimizer.zero_grad()
-
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs_dict = model(inputs)
-                    outputs = outputs_dict['out']
-                    loss = criterion(outputs, labels)
-
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
-
-                preds = torch.argmax(outputs, dim=1)
-                running_loss += loss.item() * inputs.size(0)
-
-                # Compute and store IoU for this batch
-                iou_batch = compute_iou(preds, labels, num_classes)
-                iou_values[phase].append(iou_batch)
-
-            # Update learning rate using the scheduler only in the training phase
-            if phase == 'train':
-                scheduler.step()
-
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_iou = np.nanmean(np.array(iou_values[phase]))
-            print('{} Loss: {:.4f} mIoU: {:.4f}'.format(phase, epoch_loss, epoch_iou))
-
-            # Reset IoU values for the next epoch
-            iou_values[phase] = []
-
-            # Check for early stopping in the validation phase
-            if phase == 'val':
-                early_stopping(epoch_loss, model)
-
-                if early_stopping.early_stop:
-                    print("Early stopping")
-                    model.load_state_dict(torch.load(outfile))
-                    return model
-    
-    # Load best model found
-    model.load_state_dict(torch.load(outfile))
     return model
 
 
-def tensor_image_show(inp, title=None, denorm=True):
-    """Display tensor image."""
-    inp = inp.numpy().transpose((1, 2, 0))
-
-    if denorm:
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
-        inp = std * inp + mean
-        inp = np.clip(inp, 0, 1)
-
-    plt.imshow(inp)
-
+def imshow(inp, title=None, normalize=True):
+    """Imshow for Tensor."""
+    
+    if len(inp.shape) == 2:  # if 2D tensor (like a mask)
+        inp = inp.numpy()
+        if normalize:
+            inp = (inp - inp.min()) / (inp.max() - inp.min())  # Normalize to range [0,1]
+        plt.imshow(inp, cmap='gray')  # using gray colormap for 2D
+    else:
+        inp = inp.numpy().transpose((1, 2, 0))
+        if normalize:
+            mean = np.array([0.485, 0.456, 0.406])
+            std = np.array([0.229, 0.224, 0.225])
+            inp = std * inp + mean
+            inp = np.clip(inp, 0, 1)
+        plt.imshow(inp)
+    
     if title is not None:
         plt.title(title)
-
     plt.pause(0.001)  # pause a bit so that plots are updated
 
 
-def visualize_model(model, num_images=6, class_names=None, dataloaders=None, device=None):
+
+def visualize_model(model=None, num_images=6, dataloaders=None, device=None):
     was_training = model.training
     model.eval()
     images_so_far = 0
-    fig = plt.figure()
+    fig = plt.figure(figsize=(15, 10))  # Adjusted figure size for clarity
 
     with torch.no_grad():
-        for i, (inputs, labels) in enumerate(dataloaders['val']):
+        for i, (inputs, labels) in enumerate(dataloaders['test']):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
+            outputs_dict = model(inputs)
+            outputs = outputs_dict['out']
+            preds = torch.argmax(outputs, dim=1)
 
             for j in range(inputs.size()[0]):
                 images_so_far += 1
-                ax = plt.subplot(num_images//2, 2, images_so_far)
+
+                # Display input image
+                ax = plt.subplot(num_images, 2, images_so_far*2-1)
                 ax.axis('off')
-                ax.set_title(f'predicted: {class_names[preds[j]]}')
-                tensor_image_show(inputs.cpu().data[j])
+                ax.set_title(f'Input Image')
+                imshow(inputs.cpu().data[j])
+
+                # Display predicted mask
+                ax = plt.subplot(num_images, 2, images_so_far*2)
+                ax.axis('off')
+                ax.set_title(f'Predicted Mask')
+                imshow(preds.cpu().data[j], normalize=False)
 
                 if images_so_far == num_images:
                     model.train(mode=was_training)
@@ -268,22 +167,35 @@ def visualize_model(model, num_images=6, class_names=None, dataloaders=None, dev
         model.train(mode=was_training)
 
 
-def visualize_model_predictions(model, img_path, class_names=None, device=None, transform=None):
+def visualize_model_predictions(model=None, img_path=None, data_transforms=None, device=None):
     was_training = model.training
     model.eval()
 
-    img = Image.open(img_path)
-    img = transform(img)
-    img = img.unsqueeze(0)
-    img = img.to(device)
+    # Load and preprocess image
+    img = cv.imread(img_path)
+    img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+    img_transformed = data_transforms['test'](image=img)['image'].unsqueeze(0).to(device)
 
     with torch.no_grad():
-        outputs = model(img)
-        _, preds = torch.max(outputs, 1)
+        outputs_dict = model(img_transformed)
+        outputs = outputs_dict['out']
+        preds = torch.argmax(outputs, dim=1)
 
-        ax = plt.subplot(2,2,1)
+        # Display original image
+        ax = plt.subplot(1, 2, 1)
         ax.axis('off')
-        ax.set_title(f'Predicted: {class_names[preds[0]]}')
-        tensor_image_show(img.cpu().data[0])
+        ax.set_title('Original Image')
+        plt.imshow(img)
 
-        model.train(mode=was_training)
+        # Display predicted mask
+        ax = plt.subplot(1, 2, 2)
+        ax.axis('off')
+        ax.set_title('Predicted Mask')
+        # Assuming preds is a 2D tensor since it's a single image
+        plt.imshow(preds.cpu().data[0], cmap='gray')  # Use gray colormap for the mask
+
+    model.train(mode=was_training)
+
+    plt.show()  # Added to display the plots
+
+
