@@ -1,13 +1,9 @@
-import torch
 import cv2 as cv
 import matplotlib.pyplot as plt
 import torchvision.transforms as T
 
-from utils.segmentation import *
-from models.deeplabv3 import deeplabv3
-from skimage.segmentation import slic, clear_border, expand_labels
+from skimage.segmentation import slic, clear_border
 from skimage.color import label2rgb
-from PIL import Image
 
 
 class FoodSegmenter:
@@ -25,22 +21,12 @@ class FoodSegmenter:
         self.img = None
         self.plate_mask = None
         self.segmentation_map = None
-        self.model = model               # If True, use SLIC algorithm
-        self.params_paths = params_path if model == 'deeplabv3' else None
+        self.model = model
+
 
     def __call__(self, img, plate_coords, display=False):
         return self.segment_food(img, plate_coords, display=display)
     
-    def preprocess_opencv_image(self, cv2_image):
-        # Convert BGR to RGB
-        rgb_image = cv.cvtColor(cv2_image, cv.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_image)
-        preprocess = T.Compose([
-            T.Resize((256, 256)),  
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-        return preprocess(pil_image).unsqueeze(0)  # add a batch dimension
     
     def segment_food(self, img, plate_mask, display=False):
         """
@@ -106,37 +92,6 @@ class FoodSegmenter:
             
             return self.segmentation_map
         
-        if self.model == "deeplabv3":
-            
-            # Set default device
-            device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-            
-            input_tensor = self.preprocess_opencv_image(self.img).to(device)
-
-            # Load model...
-            model = deeplabv3(backbone="resnet50",
-                              num_classes=104,
-                              pretrained=True,
-                              freeze_weights=True,
-                              progress=True).to(device)
-            
-            # ...and weights
-            model.load_state_dict(torch.load(self.params_paths))
-
-            # Inference
-            model.eval()
-            with torch.no_grad():
-                output = model(input_tensor)
-
-            print("output: ", output["out"].shape)
-
-            # Post-process the Output
-            predictions = torch.argmax(output["out"], dim=1)  # get the most likely prediction for each pixel
-            self.segmentation_map = predictions.squeeze().cpu().numpy()
-
-            print("predicions", predictions)
-            print("segmentation_map", np.unique(self.segmentation_map))
-
-            return self.segmentation_map
+        raise ValueError("Segmentation model not valid. Please use: 'slic'.")
 
 

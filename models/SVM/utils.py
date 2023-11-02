@@ -6,7 +6,6 @@ from skimage.feature import local_binary_pattern
 from sklearn.cluster import AgglomerativeClustering
 
 
-
 def color_agglomerative_clustering(data, max_num_clusters=1024):
     """
     Wrapper for the AgglomerativeClustering function as defined by scikit-learn library.
@@ -43,43 +42,6 @@ def dominant_color_histogram(image, dominant_colors):
     histogram, _ = np.histogram(closest_dominant_colors, bins=np.arange(len(dominant_colors) + 1))
     
     return histogram
-
-
-# def get_color_histogram(image, num_clusters=1024, sample_size=None):
-#     """
-#     Compute the color histogram of an image based on dominant colors.
-
-#     This function first extracts the BGR values from the input image, and then
-#     determines the dominant colors by sampling and clustering the colors. Finally,
-#     it computes and returns the color histogram of the image based on the dominant colors.
-
-#     Args:
-#         image (np.array):
-#             A 3D NumPy array representing the input image, where
-#             the dimensions represent [height, width, color_channels].
-#         num_clusters (int, optional):
-#             The number of clusters to form when finding dominant colors
-#             (default: 1024).
-#         sample_size (int, optional):
-#             The number of BGR values to sample when determining
-#             dominant colors. If None, all values are used (default: None).
-
-#     Returns:
-#         np.array:
-#             A color histogram of the input image based on the dominant colors.
-#     """
-#     # Extract BGR values.
-#     bgr_values = image.reshape(-1, 3)
-#     sample_size = bgr_values.shape[0] if sample_size is None else sample_size # Use all colors if not specified
-#     rgb_sample = bgr_values[np.random.choice(bgr_values.shape[0], sample_size, replace=False)]
-
-#     # Get dominant colors.
-#     dominant_colors = get_dominant_colors(rgb_sample, num_clusters=num_clusters)
-
-#     # Compute the color histogram for the image.
-#     color_histogram = dominant_color_histogram(image, dominant_colors)
-
-#     return color_histogram
 
 
 def get_color_histogram(image, num_clusters=1024, sample_size=None):

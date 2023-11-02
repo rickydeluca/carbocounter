@@ -1,14 +1,13 @@
 import argparse
 import torch
-import numpy as np
+import cv2 as cv
 
 from modules.plate_detection import PlateDetector
 from modules.food_segmentation import FoodSegmenter
 from modules.food_recognition import FoodRecognizer
-from modules.volume_estimation_v3 import VolumeEstimator
+from modules.volume_estimation import VolumeEstimator
 from modules.carbo_estimation import CarboEstimator
 
-from utils.read_write import load_image
 
 def parse_args():
     """
@@ -23,7 +22,7 @@ def parse_args():
     parser.add_argument('-i', '--image', type=str, required=True, help='Path to image.')
     parser.add_argument('-v', '--verbose', action='store_true', help='Display the process step by step.')
     parser.add_argument('-f', '--focal_length', type=int, default=50, help='Focal lenght of the camera (in mm). (default: 50).')
-    parser.add_argument('--diameter', type=int, default=260, help='Actual diameter of the plate (in mm). (default: 260)')
+    parser.add_argument('-d', '--diameter', type=int, default=260, help='Actual diameter of the plate (in mm). (default: 260)')
     parser.add_argument('--segmenter', type=str, default='slic', help='Model used for food segmentation.')
     parser.add_argument('--classifier', type=str, default='resnet50', help='Model used for food classification.')
     parser.add_argument('--classes_file', type=str, default='data/food-101/meta/classes.txt', help='Path to the file containing the food class names. txt format; one class per row. (default: "data/food-101/meta/classes.txt")')
@@ -47,8 +46,9 @@ def main():
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     device = torch.device("cpu")
 
-    # Load images
-    image = load_image(args.image, resize_dims=(640, 480))
+    # Load and resize image
+    image = cv.imread(args.image)
+    image = cv.resize(image, (640, 480))
 
     # Init framework modules
     plate_detector  = PlateDetector()
@@ -88,9 +88,8 @@ def main():
     print("***********************************")
     print("\n\n")
 
+
+
+
 if __name__ == "__main__":
     main()
-
-
-
-
