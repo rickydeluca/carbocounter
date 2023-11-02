@@ -1,14 +1,13 @@
-best_models/
 data/
-test/
-tmp/
+trained_params/
 
 datasets/__pycache__
-models/__pycache__
 modules/__pycache__
-utils/__pycache__
-train_utils/__pycache__
 
-carbo-count.yml
-
-todo
+models/AdaBins
+models/GourmetNet
+models/__pycache__
+models/AdaBins/__pycache__
+models/GourmetNet/__pycache__
+models/ResNet/__pycache__
+models/SVM/__pycache__
