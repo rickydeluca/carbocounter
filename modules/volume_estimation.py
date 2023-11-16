@@ -9,36 +9,40 @@ from models.AdaBins.infer import InferenceHelper
 
 class VolumeEstimator:
 
-    def __init__(self, idx2class=None, focal_length= None, plate_diameter=None, inference_dataset='nyu'):
+    def __init__(self, idx2class=None, inference_dataset='nyu'):
         self.idx2class = idx2class
-        self.focal_length = focal_length
-        self.plate_diameter = plate_diameter
         self.inference_dataset = inference_dataset
 
 
-    def __call__(self, img, segmentation_map, plate_coords, display=False):
+    def __call__(self, img, segmentation_map, plate_coords, focal_length= None, plate_diameter=None, display=False):
         self.img = img
         self.segmentation_map = segmentation_map
         self.plate_coords = plate_coords
         self.display = display
+        self.focal_length = focal_length
+        self.plate_diameter = plate_diameter
         return self.estimate_volume()
     
 
     def estimate_volume(self):
 
-        # Get the depth map
-        depth_map = self.infer_depth_map(self.img, inference_dataset=self.inference_dataset)
-
-        # Rescale the depth using the plate diameter as a reference
+        # Estimate distance from the plate diameter
         (center_x, center_y), radius = cv.minEnclosingCircle(self.plate_coords)
         diameter_in_pixels = 2 * radius
         distance = self.distance_from_diameter(focal_length=self.focal_length, actual_diameter=self.plate_diameter, diameter_in_pixels=diameter_in_pixels)
 
-        print("distance:", distance)
+        print("Estimated distance:", distance)
 
-        min_original_depth = np.min(depth_map)
-        max_original_depth = np.max(depth_map)
-        depth_map = np.vectorize(self.rescale_depth)(depth_map, min_original_depth, max_original_depth, distance-3, distance).astype(np.float32)
+        # Get the depth map
+        depth_map = self.infer_depth_map(self.img, inference_dataset=self.inference_dataset, min_depth=distance, max_depth=distance+30)
+
+        if self.display:
+            plt.imshow(depth_map, cmap='plasma')
+            plt.show()
+            
+        # min_original_depth = np.min(depth_map)
+        # max_original_depth = np.max(depth_map)
+        # depth_map = np.vectorize(self.rescale_depth)(depth_map, min_original_depth, max_original_depth, distance-3, distance).astype(np.float32)
 
         # DEBUG
         print("min depth: ", np.min(depth_map))
@@ -84,6 +88,10 @@ class VolumeEstimator:
         # Estimate the volumes of the segments
         self.segment_volumes, self.hull_meshes = self.get_segment_volumes()
         print("Segment volumes:", self.segment_volumes)
+
+        # if self.display:
+        #     for mesh in self.hull_meshes:
+        #         o3d.visualization.draw_geometries([mesh])
 
         return self.segment_volumes
 
@@ -140,6 +148,9 @@ class VolumeEstimator:
 
             # Retrieve the food class name
             predicted_class = self.idx2class[label]
+
+            # Clear the segmented point cloud
+            segmented_pcd = self.clear_point_cloud(segmented_pcd)
             hull, _ = segmented_pcd.compute_convex_hull()
 
             try:
@@ -230,18 +241,16 @@ class VolumeEstimator:
         return (focal_length * actual_diameter) / diameter_in_pixels
 
 
-    def infer_depth_map(self, img, inference_dataset='nyu'):
+    def infer_depth_map(self, img, inference_dataset='nyu', min_depth=None, max_depth=None):
         # Get model from AdaBins
-        infer_helper = InferenceHelper(dataset=inference_dataset)
+        infer_helper = InferenceHelper(dataset=inference_dataset, min_depth=min_depth, max_depth=max_depth)
 
         # Covert input CV image to PIL
         img_rgb = cv.cvtColor(img, cv.COLOR_BGR2RGB) 
         img_pil = transforms.ToPILImage()(img_rgb.astype(np.uint8))
 
-        # Resize to standard shape
-        img_pil = img_pil.resize((640, 480))
-
         # DEBUG
+        # img_pil = img_pil.resize((640, 480))
         # print("PIL image size:", img_pil.size)
 
         bin_centers, predicted_depth = infer_helper.predict_pil(img_pil)
@@ -263,3 +272,16 @@ class VolumeEstimator:
         # Opening
         opened = cv.morphologyEx(closed, cv.MORPH_OPEN, kernel)
         return opened
+    
+
+    def clear_point_cloud(self, point_cloud):
+        """
+        Clear the given `point_cloud` by removing the:
+        - duplicated points
+        - non finite points
+        """
+
+        point_cloud = point_cloud.remove_duplicated_points()
+        point_cloud = point_cloud.remove_non_finite_points()
+        return point_cloud
+

@@ -31,6 +31,33 @@ def parse_args():
     return parser.parse_args()
 
 
+def resize_image(image, size):
+    """
+    Resize the input image. If `size` is a tuple resize the image to this dimension,
+    otherwise id `size` is a scalar value, resize the shortest dimension to this value 
+    while keeping the aspect ratio.
+    """
+    
+    if isinstance(size, tuple):
+        resized_image = cv.resize(image, size)
+
+    elif isinstance(size, int) or isinstance(size, float):
+        height, width = image.shape[:2]
+        
+        if height < width:
+            new_height = int(size)
+            new_width = int((size / height) * width)
+        else:
+            new_width = int(size)
+            new_height = int((size / width) * height)
+
+        resized_image = cv.resize(image, (new_width, new_height))
+    
+    else:
+        raise ValueError("Invalid size parameter. Should be a tuple or a scalar value.")
+
+    return resized_image
+
 def main():
 
     # Read terminal input
@@ -48,35 +75,21 @@ def main():
 
     # Load and resize image
     image = cv.imread(args.image)
-    image = cv.resize(image, (640, 480))
+    image = resize_image(image, 480)
 
     # Init framework modules
     plate_detector  = PlateDetector()
     food_segmenter  = FoodSegmenter(model=args.segmenter)
-    food_recognizer = FoodRecognizer(
-        model=args.classifier,
-        num_classes=104,
-        class_names=idx2class,
-        device=device
-    )
-    volume_estimator = VolumeEstimator(
-        idx2class=idx2class,
-        focal_length=args.focal_length,
-        plate_diameter=args.diameter,
-        inference_dataset='nyu'
-    )
+    food_recognizer = FoodRecognizer(model=args.classifier, num_classes=104, class_names=idx2class, device=device)
+    volume_estimator = VolumeEstimator(idx2class=idx2class, inference_dataset='nyu')
     carbo_estimator = CarboEstimator(food_nutrients_file=args.nutrients_file)
 
     # Run framework
-    plate_coords, plate_mask = plate_detector(image)
+    plate_coords, plate_mask = plate_detector(image, display=args.verbose)
+    return
     segmentation_map = food_segmenter(image, plate_mask, display=args.verbose)
     segmentation_map= food_recognizer(image, segmentation_map, display=args.verbose)
-    food_volumes = volume_estimator(
-        image,
-        segmentation_map,
-        plate_coords, 
-        display=args.verbose
-    )
+    food_volumes = volume_estimator(image, segmentation_map, plate_coords, focal_length=args.focal_length, plate_diameter=args.diameter, display=args.verbose)
     food_carbs = carbo_estimator(food_volumes=food_volumes)
 
 

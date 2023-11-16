@@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
 import matplotlib.pyplot as plt
 
 from torch.optim import lr_scheduler
-from torchvision import datasets, transforms
+from torchvision import transforms
 
 from datasets.food101 import Food101Dataset
 
